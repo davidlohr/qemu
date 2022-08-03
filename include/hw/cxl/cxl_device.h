@@ -119,6 +119,16 @@ typedef struct cxl_device_state {
 
     /* memory region for persistent memory, HDM */
     uint64_t pmem_size;
+
+    /* background command handling (times in ms) */
+    struct {
+        uint16_t opcode;
+        QEMUTimer *timer;
+        uint16_t complete_pct;
+        uint64_t starttime;
+        /* set by each bg cmd, cleared when done by the bg_timer */
+        uint64_t runtime;
+    } bg;
 } CXLDeviceState;
 
 /* Initialize the register block for a device */
@@ -229,6 +239,23 @@ REG64(CXL_MEM_DEV_STS, 0)
     FIELD(CXL_MEM_DEV_STS, MEDIA_STATUS, 2, 2)
     FIELD(CXL_MEM_DEV_STS, MBOX_READY, 4, 1)
     FIELD(CXL_MEM_DEV_STS, RESET_NEEDED, 5, 3)
+
+static inline void __toggle_media(CXLDeviceState *cxl_dstate, int val)
+{
+    uint64_t dev_status_reg;
+
+    dev_status_reg = FIELD_DP64(0, CXL_MEM_DEV_STS, MEDIA_STATUS, val);
+    cxl_dstate->mbox_reg_state64[R_CXL_MEM_DEV_STS] = dev_status_reg;
+}
+#define cxl_dev_disable_media(cxlds)                    \
+        do { __toggle_media((cxlds), 0x3); } while (0)
+#define cxl_dev_enable_media(cxlds)                     \
+        do { __toggle_media((cxlds), 0x1); } while (0)
+
+static inline bool sanitize_running(CXLDeviceState *cxl_dstate)
+{
+    return !!cxl_dstate->bg.runtime && cxl_dstate->bg.opcode == 0x4400;
+}
 
 struct CXLType3Dev {
     /* Private */

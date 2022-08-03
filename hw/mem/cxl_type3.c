@@ -11,6 +11,7 @@
 #include "qemu/pmem.h"
 #include "qemu/range.h"
 #include "qemu/rcu.h"
+#include "qemu/guest-random.h"
 #include "sysemu/hostmem.h"
 #include "hw/cxl/cxl.h"
 
@@ -234,6 +235,10 @@ MemTxResult cxl_type3_read(PCIDevice *d, hwaddr host_addr, uint64_t *data,
         return MEMTX_ERROR;
     }
 
+    if (sanitize_running(&ct3d->cxl_dstate)) {
+        qemu_guest_getrandom_nofail(data, size);
+        return MEMTX_OK;
+    }
     return address_space_read(&ct3d->hostmem_as, dpa_offset, attrs, data, size);
 }
 
@@ -254,6 +259,11 @@ MemTxResult cxl_type3_write(PCIDevice *d, hwaddr host_addr, uint64_t data,
     }
 
     if (dpa_offset > int128_get64(mr->size)) {
+        return MEMTX_OK;
+    }
+
+    /* becomes a nop */
+    if (sanitize_running(&ct3d->cxl_dstate)) {
         return MEMTX_OK;
     }
     return address_space_write(&ct3d->hostmem_as, dpa_offset, attrs,

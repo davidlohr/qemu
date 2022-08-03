@@ -13,6 +13,7 @@
 #include "qemu/cutils.h"
 #include "qemu/log.h"
 #include "qemu/uuid.h"
+#include "sysemu/hostmem.h"
 
 /*
  * How to add a new command, example. The command set FOO, with cmd BAR.
@@ -59,6 +60,9 @@ enum {
         #define GET_PARTITION_INFO     0x0
         #define GET_LSA       0x2
         #define SET_LSA       0x3
+    SANITIZE    = 0x44,
+        #define OVERWRITE     0x0
+        #define SECURE_ERASE  0x1
 };
 
 /* 8.2.8.4.5.1 Command Return Codes */
@@ -382,10 +386,106 @@ static ret_code cmd_ccls_set_lsa(struct cxl_cmd *cmd,
     return CXL_MBOX_SUCCESS;
 }
 
+/* Perform the actual device zeroing */
+static void __do_sanitization(CXLDeviceState *cxl_dstate)
+{
+    MemoryRegion *mr;
+    CXLType3Dev *ct3d = container_of(cxl_dstate, CXLType3Dev, cxl_dstate);
+
+    mr = host_memory_backend_get_memory(ct3d->hostmem);
+    if (mr) {
+        void *hostmem = memory_region_get_ram_ptr(mr);
+        memset(hostmem, 0, memory_region_size(mr));
+    }
+
+    if (ct3d->lsa) {
+        mr = host_memory_backend_get_memory(ct3d->lsa);
+        if (mr) {
+            void *lsa = memory_region_get_ram_ptr(mr);
+            memset(lsa, 0, memory_region_size(mr));
+        }
+    }
+}
+
+/*
+ * CXL 3.0 spec section 8.2.9.8.5.1 - Sanitize.
+ *
+ * Once the Sanitize command has started successfully, the device shall be
+ * placed in the media disabled state. If the command fails or is interrupted
+ * by a reset or power failure, it shall remain in the media disabled state
+ * until a successful Sanitize command has been completed. During this state:
+ *
+ * 1. Memory writes to the device will have no effect, and all memory reads
+ * will return random values (no user data returned, even for locations that
+ * the failed Sanitize operation didn’t sanitize yet).
+ *
+ * 2. Mailbox commands shall still be processed in the disabled state, except
+ * that commands that access Sanitized areas shall fail with the Media Disabled
+ * error code.
+*/
+ static ret_code cmd_sanitize_overwrite(struct cxl_cmd *cmd,
+                                       CXLDeviceState *cxl_dstate,
+                                       uint16_t *len)
+{
+    uint64_t total_mem; /* in Mb */
+    int secs;
+
+    total_mem = cxl_dstate->pmem_size >> 20;
+    if (total_mem <= 512) {
+        secs = 4;
+    } else if (total_mem <= 1024) {
+        secs = 8;
+    } else if (total_mem <= 2 * 1024) {
+        secs = 15;
+    } else if (total_mem <= 4 * 1024) {
+        secs = 30;
+    } else if (total_mem <= 8 * 1024) {
+        secs = 60;
+    } else if (total_mem <= 16 * 1024) {
+        secs = 2 * 60;
+    } else if (total_mem <= 32 * 1024) {
+        secs = 4 * 60;
+    } else if (total_mem <= 64 * 1024) {
+        secs = 8 * 60;
+    } else if (total_mem <= 128 * 1024) {
+        secs = 15 * 60;
+    } else if (total_mem <= 256 * 1024) {
+        secs = 30 * 60;
+    } else if (total_mem <= 512 * 1024) {
+        secs = 60 * 60;
+    } else if (total_mem <= 1024 * 1024) {
+        secs = 120 * 60;
+    } else {
+        secs = 240 * 60; /* max 4 hrs */
+    }
+
+    /* EBUSY other bg cmds as of now */
+    cxl_dstate->bg.runtime = secs * 1000UL;
+    *len = 0;
+
+    qemu_log_mask(LOG_UNIMP,
+                  "Sanitize/overwrite command runtime for %ldMb media: %d seconds\n",
+                  total_mem, secs);
+
+    cxl_dev_disable_media(cxl_dstate);
+
+    if (secs > 2) {
+        /* sanitize when done */
+        return CXL_MBOX_BG_STARTED;
+    } else {
+        __do_sanitization(cxl_dstate);
+        cxl_dev_enable_media(cxl_dstate);
+
+        return CXL_MBOX_SUCCESS;
+    }
+}
+
 #define IMMEDIATE_CONFIG_CHANGE (1 << 1)
 #define IMMEDIATE_DATA_CHANGE (1 << 2)
 #define IMMEDIATE_POLICY_CHANGE (1 << 3)
 #define IMMEDIATE_LOG_CHANGE (1 << 4)
+#define SECURITY_STATE_CHANGE (1 << 5)
+#define BACKGROUND_OPERATION (1 << 6)
 
 static struct cxl_cmd cxl_cmd_set[256][256] = {
     [EVENTS][GET_RECORDS] = { "EVENTS_GET_RECORDS",
@@ -409,26 +509,62 @@ static struct cxl_cmd cxl_cmd_set[256][256] = {
     [CCLS][GET_LSA] = { "CCLS_GET_LSA", cmd_ccls_get_lsa, 0, 0 },
     [CCLS][SET_LSA] = { "CCLS_SET_LSA", cmd_ccls_set_lsa,
         ~0, IMMEDIATE_CONFIG_CHANGE | IMMEDIATE_DATA_CHANGE },
+    [SANITIZE][OVERWRITE] = { "SANITIZE_OVERWRITE", cmd_sanitize_overwrite,
+        0, IMMEDIATE_DATA_CHANGE | SECURITY_STATE_CHANGE | BACKGROUND_OPERATION },
 };
+
+/*
+ * While the command is executing in the background, the device should
+ * update the percentage complete in the Background Command Status Register
+ * at least once per second.
+ */
+#define CXL_MBOX_BG_UPDATE_FREQ 1000UL
 
 void cxl_process_mailbox(CXLDeviceState *cxl_dstate)
 {
     uint16_t ret = CXL_MBOX_SUCCESS;
     struct cxl_cmd *cxl_cmd;
-    uint64_t status_reg;
+    uint64_t status_reg = 0;
     opcode_handler h;
+    uint8_t bg_started = 0;
     uint64_t command_reg = cxl_dstate->mbox_reg_state64[R_CXL_DEV_MAILBOX_CMD];
 
     uint8_t set = FIELD_EX64(command_reg, CXL_DEV_MAILBOX_CMD, COMMAND_SET);
     uint8_t cmd = FIELD_EX64(command_reg, CXL_DEV_MAILBOX_CMD, COMMAND);
     uint16_t len = FIELD_EX64(command_reg, CXL_DEV_MAILBOX_CMD, LENGTH);
+
     cxl_cmd = &cxl_cmd_set[set][cmd];
     h = cxl_cmd->handler;
     if (h) {
         if (len == cxl_cmd->in) {
             cxl_cmd->payload = cxl_dstate->mbox_reg_state +
                 A_CXL_DEV_CMD_PAYLOAD;
+
+            /* Only one bg command at a time */
+            if ((cxl_cmd->effect & BACKGROUND_OPERATION) &&
+                cxl_dstate->bg.runtime != 0) {
+                    ret = CXL_MBOX_BUSY;
+                    goto done;
+            }
+
+            /* forbid any selected commands while overwriting */
+            if (sanitize_running(cxl_dstate)) {
+                if (h == cmd_events_get_records ||
+                    h == cmd_ccls_set_lsa ||
+                    h == cmd_ccls_get_lsa ||
+                    h == cmd_logs_get_log ||
+                    h == cmd_sanitize_overwrite) {
+                        ret = CXL_MBOX_MEDIA_DISABLED;
+                        goto done;
+                }
+            }
+
             ret = (*h)(cxl_cmd, cxl_dstate, &len);
+            if ((cxl_cmd->effect & BACKGROUND_OPERATION) &&
+                ret == CXL_MBOX_BG_STARTED) {
+                bg_started = 1;
+            }
+
             assert(len <= cxl_dstate->payload_size);
         } else {
             ret = CXL_MBOX_INVALID_PAYLOAD_LENGTH;
@@ -438,9 +574,12 @@ void cxl_process_mailbox(CXLDeviceState *cxl_dstate)
                       set << 8 | cmd);
         ret = CXL_MBOX_UNSUPPORTED;
     }
-
-    /* Set the return code */
-    status_reg = FIELD_DP64(0, CXL_DEV_MAILBOX_STS, ERRNO, ret);
+done:
+    /* Set bg and the return code */
+    if (bg_started) {
+        status_reg = FIELD_DP64(0, CXL_DEV_MAILBOX_STS, BG_OP, bg_started);
+    }
+    status_reg = FIELD_DP64(status_reg, CXL_DEV_MAILBOX_STS, ERRNO, ret);
 
     /* Set the return length */
     command_reg = FIELD_DP64(command_reg, CXL_DEV_MAILBOX_CMD, COMMAND_SET, 0);
@@ -450,9 +589,81 @@ void cxl_process_mailbox(CXLDeviceState *cxl_dstate)
     cxl_dstate->mbox_reg_state64[R_CXL_DEV_MAILBOX_CMD] = command_reg;
     cxl_dstate->mbox_reg_state64[R_CXL_DEV_MAILBOX_STS] = status_reg;
 
+    if (bg_started) {
+        uint64_t bg_status_reg, now;
+
+        cxl_dstate->bg.opcode = (set << 8) | cmd;
+
+        bg_status_reg = FIELD_DP64(0, CXL_DEV_BG_CMD_STS, OP, cxl_dstate->bg.opcode);
+        bg_status_reg = FIELD_DP64(bg_status_reg, CXL_DEV_BG_CMD_STS,
+                                   PERCENTAGE_COMP, 0);
+        cxl_dstate->mbox_reg_state64[R_CXL_DEV_BG_CMD_STS] = bg_status_reg;
+
+        now = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
+        cxl_dstate->bg.starttime = now;
+        timer_mod(cxl_dstate->bg.timer, now + CXL_MBOX_BG_UPDATE_FREQ);
+    }
+
     /* Tell the host we're done */
     ARRAY_FIELD_DP32(cxl_dstate->mbox_reg_state32, CXL_DEV_MAILBOX_CTRL,
                      DOORBELL, 0);
+}
+
+static void bg_timercb(void *opaque)
+{
+    CXLDeviceState *cxl_dstate = opaque;
+    uint64_t bg_status_reg = 0;
+    uint64_t now = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
+    uint64_t total_time = cxl_dstate->bg.starttime + cxl_dstate->bg.runtime;
+
+    assert(cxl_dstate->bg.runtime > 0);
+    bg_status_reg = FIELD_DP64(bg_status_reg, CXL_DEV_BG_CMD_STS,
+                               OP, cxl_dstate->bg.opcode);
+
+    if (now >= total_time) { /* we are done */
+        uint64_t status_reg;
+        uint16_t ret = 0;
+
+        cxl_dstate->bg.complete_pct = 100;
+        /* Clear bg */
+        status_reg = FIELD_DP64(0, CXL_DEV_MAILBOX_STS, BG_OP, 0);
+        cxl_dstate->mbox_reg_state64[R_CXL_DEV_MAILBOX_STS] = status_reg;
+
+        bg_status_reg = FIELD_DP64(bg_status_reg, CXL_DEV_BG_CMD_STS, RET_CODE, ret);
+
+        if (ret == 0) { /* success return */
+            switch (cxl_dstate->bg.opcode) {
+            case 0x4400: /* sanitize */
+                __do_sanitization(cxl_dstate);
+                cxl_dev_enable_media(cxl_dstate);
+                break;
+            case 0x4304: /* TODO: scan media */
+                break;
+            default:
+                __builtin_unreachable();
+                break;
+            }
+        }
+
+        qemu_log_mask(LOG_UNIMP, "Background command %04xh finished: %s\n",
+                      cxl_dstate->bg.opcode, ret == 0 ? "success" : "aborted");
+    } else {
+        double pct;
+
+        pct = 100 * now / total_time;
+        cxl_dstate->bg.complete_pct = pct; /* estimate only */
+        timer_mod(cxl_dstate->bg.timer, now + CXL_MBOX_BG_UPDATE_FREQ);
+    }
+
+    bg_status_reg = FIELD_DP64(bg_status_reg, CXL_DEV_BG_CMD_STS, PERCENTAGE_COMP,
+                               cxl_dstate->bg.complete_pct);
+    cxl_dstate->mbox_reg_state64[R_CXL_DEV_BG_CMD_STS] = bg_status_reg;
+
+    if (cxl_dstate->bg.complete_pct == 100) {
+        cxl_dstate->bg.starttime = 0;
+        /* registers are updated, allow new bg-capable cmds */
+        cxl_dstate->bg.runtime = 0;
+    }
 }
 
 int cxl_initialize_mailbox(CXLDeviceState *cxl_dstate)
@@ -473,6 +684,10 @@ int cxl_initialize_mailbox(CXLDeviceState *cxl_dstate)
             }
         }
     }
+
+    cxl_dstate->bg.complete_pct = 0;
+    cxl_dstate->bg.timer = timer_new_ms(QEMU_CLOCK_VIRTUAL,
+                                        bg_timercb, cxl_dstate);
 
     return qemu_uuid_parse(cel_uuidstr, &cel_uuid);
 }
