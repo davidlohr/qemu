@@ -257,37 +257,42 @@ static void bi_handler(CXLComponentState *cxl_cstate, hwaddr offset,
     ComponentRegisters *cregs = &cxl_cstate->crb;
     uint32_t sts, *cache_mem = cregs->cache_mem_registers;
     bool to_commit = false;
-    int type = 0; /* Unused value - work around for compiler warning */
+    int type = 0;
 
     switch (offset) {
     case A_CXL_BI_RT_CTRL:
+        type = CXL_BISTATE_RT;
         to_commit = FIELD_EX32(value, CXL_BI_RT_CTRL, COMMIT);
         if (to_commit) {
             sts = cxl_cache_mem_read_reg(cxl_cstate,
                                          A_CXL_BI_RT_STATUS, 4);
             sts = FIELD_DP32(sts, CXL_BI_RT_STATUS, COMMITTED, 0);
             stl_le_p((uint8_t *)cache_mem + A_CXL_BI_RT_STATUS, sts);
-            type = CXL_BISTATE_RT;
         }
         break;
     case A_CXL_BI_DECODER_CTRL:
         bi_decoder_dport_check(cxl_cstate, value);
+        type = CXL_BISTATE_DECODER;
         to_commit = FIELD_EX32(value, CXL_BI_DECODER_CTRL, COMMIT);
         if (to_commit) {
             sts = cxl_cache_mem_read_reg(cxl_cstate,
                                          A_CXL_BI_DECODER_STATUS, 4);
             sts = FIELD_DP32(sts, CXL_BI_DECODER_STATUS, COMMITTED, 0);
             stl_le_p((uint8_t *)cache_mem + A_CXL_BI_DECODER_STATUS, sts);
-            type = CXL_BISTATE_DECODER;
         }
         break;
     default:
         break;
     }
 
+    /*
+     * Record the commit time so the status read reports COMMITTED after a
+     * short delay.  Clearing CTRL.COMMIT (1->0) clears COMMITTED, per
+     * CXL r3.2 8.2.4.26.3 / 8.2.4.27.3.
+     */
+    cxl_cstate->bi_state[type].last_commit =
+            to_commit ? qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) : 0;
     if (to_commit) {
-        cxl_cstate->bi_state[type].last_commit =
-                qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
         cxl_cstate->bi_state[type].commits++;
     }
 
