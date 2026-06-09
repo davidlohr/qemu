@@ -199,6 +199,8 @@ static void cxl_dsp_realize(PCIDevice *d, Error **errp)
                          PCI_BASE_ADDRESS_MEM_TYPE_64,
                      component_bar);
 
+    pcie_config_uio_svc(d, errp);
+
     return;
 
  err_chassis:

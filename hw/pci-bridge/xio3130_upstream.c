@@ -84,6 +84,7 @@ static void xio3130_upstream_realize(PCIDevice *d, Error **errp)
     if (rc < 0) {
         goto err_msi;
     }
+    pcie_config_uio_svc(d, errp);
     pcie_cap_flr_init(d);
     pcie_cap_deverr_init(d);
 

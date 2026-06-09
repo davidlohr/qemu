@@ -347,6 +347,10 @@ static void cxl_usp_realize(PCIDevice *d, Error **errp)
         goto err_cap;
     }
 
+    rc = pcie_config_uio_svc(d, errp);
+    if (usp->flitmode && rc >= 0) {
+        usp->uio_capable = true;
+    }
     return;
 
 err_cap:

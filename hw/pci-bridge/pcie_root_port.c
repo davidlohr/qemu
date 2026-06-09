@@ -120,6 +120,15 @@ static void rp_realize(PCIDevice *d, Error **errp)
     if (rpc->acs_offset) {
         pcie_acs_init(d, rpc->acs_offset);
     }
+
+    /*
+     * After AER/ACS so the SVC capability is not placed at (and then
+     * clobbered by) the AER offset. CXL derived root ports initialize
+     * SVC from their own realize.
+     */
+    if (!pci_is_cxl(d)) {
+        pcie_config_uio_svc(d, errp);
+    }
     return;
 
 err:
