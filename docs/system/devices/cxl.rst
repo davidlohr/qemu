@@ -407,6 +407,56 @@ use HDM-DB for coherence, which requires operating in Flit mode::
   -device cxl-type3,bus=swport3,volatile-memdev=cxl-mem3,id=cxl-mem3,sn=0x4 \
   -M cxl-fmw.0.targets.0=cxl.1,cxl-fmw.0.size=4G,cxl-fmw.0.interleave-granularity=4k
 
+Unordered I/O (UIO) Support
+---------------------------
+
+CXL 3.2 and PCIe 6.1 introduce Unordered I/O (UIO), which allows memory
+transactions to bypass strict ordering requirements, potentially improving
+performance for certain workloads. UIO support requires:
+
+1. **256-byte Flit Mode**: Enabled via ``x-256b-flit=on`` on all ports and devices
+2. **Streamlined Virtual Channel (SVC)**: A PCIe 6.1 extended capability that
+   provides dedicated virtual channels for UIO traffic
+
+The SVC capability defines two paths for UIO traffic:
+
+- **SVC3 (Mandatory)**: Dedicated VC for UIO traffic only (``x-uio-svc3=on``)
+- **SVC4 (Optional)**: Shared VC for both UIO and non-UIO traffic
+  (``x-uio-svc4=on``)
+
+Both paths require 256B flit mode. The CXL Type 3 device uses the ``x-uio=on``
+property to advertise UIO capability, which is then reflected in the HDM decoder
+capability registers.
+
+**Note**: Per the CXL specification, downstream switch ports do not track UIO
+capability separately; only root ports and upstream ports maintain the UIO
+capability.
+
+An example of 3 type3 devices with volatile memory below a switch. All the devices
+and ports support Unordered IO (UIO) feature which requires Streamlined Virtual Channel
+(SVC) capability and Flit mode::
+
+  qemu-system-x86_64 -M q35,cxl=on -m 4G,maxmem=8G,slots=8 -smp 4 \
+  ...
+  -device pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.1 \
+  -device cxl-rp,port=0,bus=cxl.1,id=rp13,chassis=0,slot=2,x-uio-svc3=on,
+   x-uio-svc4=on,x-256b-flit=on,x-speed=64,x-width=32 \
+  -device cxl-upstream,port=2,sn=1234,bus=rp13,id=us0,x-uio-svc3=on,
+   x-uio-svc4=on,x-256b-flit=on,x-speed=64,x-width=32 \
+  -device cxl-downstream,port=0,bus=us0,id=swport0,chassis=0,slot=4,
+   x-uio-svc3=on,x-uio-svc4=on,x-256b-flit=on,x-speed=64,x-width=32 \
+  -device cxl-downstream,port=1,bus=us0,id=swport1,chassis=0,slot=5,
+   x-uio-svc3=on,x-uio-svc4=on,x-256b-flit=on,x-speed=64,x-width=32  \
+  -device cxl-downstream,port=3,bus=us0,id=swport2,chassis=0,slot=6,
+   x-uio-svc3=on,x-uio-svc4=on,x-256b-flit=on,x-speed=64,x-width=32  \
+  -object memory-backend-ram,id=target-mem1,size=512M \
+  -object memory-backend-ram,id=target-mem2,size=512M \
+  -object memory-backend-ram,id=target-mem3,size=512M \
+  -device cxl-type3,id=mem1,bus=swport0,volatile-memdev=target-mem1,x-uio=on,x-256b-flit=on,sn=1233 \
+  -device cxl-type3,id=mem2,bus=swport1,volatile-memdev=target-mem2,x-uio=on,x-256b-flit=on,sn=1234 \
+  -device cxl-type3,id=mem3,bus=swport2,volatile-memdev=target-mem3,x-uio=on,x-256b-flit=on,sn=1235 \
+  -M cxl-fmw.0.targets.0=cxl.1,cxl-fmw.0.size=4G,cxl-fmw.0.interleave-granularity=4k
+
 A simple arm/virt example featuring a single direct connected CXL Type 3
 Volatile Memory device::
 
