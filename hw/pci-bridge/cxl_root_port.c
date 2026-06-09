@@ -48,6 +48,7 @@ typedef struct CXLRootPort {
 
     CXLComponentState cxl_cstate;
     PCIResReserve res_reserve;
+    bool uio_capable;
 } CXLRootPort;
 
 #define TYPE_CXL_ROOT_PORT "cxl-rp"

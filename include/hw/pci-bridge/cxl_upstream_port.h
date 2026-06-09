@@ -18,6 +18,7 @@ typedef struct CXLUpstreamPort {
     PCIExpLinkSpeed speed;
     PCIExpLinkWidth width;
     bool flitmode;
+    bool uio_capable;
 
     DOECap doe_cdat;
     uint64_t sn;

@@ -372,6 +372,8 @@ static const Property cxl_upstream_props[] = {
     DEFINE_PROP_PCIE_LINK_WIDTH("x-width", CXLUpstreamPort,
                                 width, PCIE_LINK_WIDTH_16),
     DEFINE_PROP_BOOL("x-256b-flit", CXLUpstreamPort, flitmode, false),
+    DEFINE_PROP_BIT("x-uio-svc3", PCIEPort, svc, UIO_MANDATORY_SVC, false),
+    DEFINE_PROP_BIT("x-uio-svc4", PCIEPort, svc, UIO_OPTIONAL_SVC, false),
 };
 
 static void cxl_upstream_class_init(ObjectClass *oc, const void *data)
