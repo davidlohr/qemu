@@ -731,6 +731,8 @@ struct CXLType3Dev {
     PCIExpLinkSpeed speed;
     PCIExpLinkWidth width;
     bool flitmode;
+    bool uio_capable;
+    bool uio_enabled;
 
     /* DOE */
     DOECap doe_cdat;

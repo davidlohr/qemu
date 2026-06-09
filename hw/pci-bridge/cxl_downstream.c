@@ -42,7 +42,7 @@ static void latch_registers(CXLDownstreamPort *dsp)
     uint32_t *write_msk = dsp->cxl_cstate.crb.cache_mem_regs_write_mask;
 
     cxl_component_register_init_common(reg_state, write_msk,
-                                       CXL2_DOWNSTREAM_PORT, true);
+                                       CXL2_DOWNSTREAM_PORT, true, false);
 }
 
 /* TODO: Look at sharing this code across all CXL port types */

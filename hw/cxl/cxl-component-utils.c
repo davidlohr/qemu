@@ -13,6 +13,22 @@
 #include "hw/pci/pci.h"
 #include "hw/cxl/cxl.h"
 
+/* CXL 4.0 specification 8.4.2.20.7 */
+#define CXL_HDM_DECODER_CTRL_WRMASK              \
+    (R_CXL_HDM_DECODER0_CTRL_IG_MASK |           \
+     R_CXL_HDM_DECODER0_CTRL_IW_MASK |           \
+     R_CXL_HDM_DECODER0_CTRL_LOCK_ON_COMMIT_MASK | \
+     R_CXL_HDM_DECODER0_CTRL_COMMIT_MASK |       \
+     R_CXL_HDM_DECODER0_CTRL_TYPE_MASK |         \
+     R_CXL_HDM_DECODER0_CTRL_BI_MASK)
+
+/* Writable only when the component is UIO capable */
+#define CXL_HDM_DECODER_CTRL_UIO_WRMASK          \
+    (R_CXL_HDM_DECODER0_CTRL_UIO_MASK |          \
+     R_CXL_HDM_DECODER0_CTRL_UIG_MASK |          \
+     R_CXL_HDM_DECODER0_CTRL_UIW_MASK |          \
+     R_CXL_HDM_DECODER0_CTRL_ISP_MASK)
+
 /* CXL r3.1 Section 8.2.4.20.1 CXL HDM Decoder Capability Register */
 int cxl_decoder_count_enc(int count)
 {
@@ -310,10 +326,12 @@ static void ras_init_common(uint32_t *reg_state, uint32_t *write_msk)
 }
 
 static void hdm_init_common(uint32_t *reg_state, uint32_t *write_msk,
-                            enum reg_type type, bool bi)
+                            enum reg_type type, bool bi, bool uio)
 {
     int decoder_count = CXL_HDM_DECODER_COUNT;
     int hdm_inc = R_CXL_HDM_DECODER1_BASE_LO - R_CXL_HDM_DECODER0_BASE_LO;
+    uint32_t ctrl_mask = CXL_HDM_DECODER_CTRL_WRMASK;
+    bool has_uio;
     int i;
 
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY, DECODER_COUNT,
@@ -330,9 +348,13 @@ static void hdm_init_common(uint32_t *reg_state, uint32_t *write_msk,
         ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY, 3_6_12_WAY, 0);
         ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY, 16_WAY, 0);
     }
-    ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY, UIO, 0);
+    has_uio = (type == CXL2_TYPE3_DEVICE || type == CXL2_UPSTREAM_PORT) && uio;
+    ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY, UIO, has_uio);
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY,
-                     UIO_DECODER_COUNT, 0);
+                     UIO_DECODER_COUNT, has_uio ? decoder_count : 0);
+    if (has_uio) {
+        ctrl_mask |= CXL_HDM_DECODER_CTRL_UIO_WRMASK;
+    }
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY, MEMDATA_NXM_CAP, 0);
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY,
                      SUPPORTED_COHERENCY_MODEL,
@@ -346,8 +368,7 @@ static void hdm_init_common(uint32_t *reg_state, uint32_t *write_msk,
         write_msk[R_CXL_HDM_DECODER0_BASE_HI + i * hdm_inc] = 0xffffffff;
         write_msk[R_CXL_HDM_DECODER0_SIZE_LO + i * hdm_inc] = 0xf0000000;
         write_msk[R_CXL_HDM_DECODER0_SIZE_HI + i * hdm_inc] = 0xffffffff;
-        /* RW: IG, IW, LOCK_ON_COMMIT, COMMIT, TYPE and BI */
-        write_msk[R_CXL_HDM_DECODER0_CTRL + i * hdm_inc] = 0x33ff;
+        write_msk[R_CXL_HDM_DECODER0_CTRL + i * hdm_inc] = ctrl_mask;
         if (type == CXL2_DEVICE ||
             type == CXL2_TYPE3_DEVICE ||
             type == CXL2_LOGICAL_DEVICE) {
@@ -397,7 +418,7 @@ static void bi_decoder_init_common(uint32_t *reg_state, uint32_t *write_msk,
 void cxl_component_register_init_common(uint32_t *reg_state,
                                         uint32_t *write_msk,
                                         enum reg_type type,
-                                        bool bi)
+                                        bool bi, bool uio)
 {
     int caps = 0;
 
@@ -437,7 +458,7 @@ void cxl_component_register_init_common(uint32_t *reg_state,
     case CXL2_LOGICAL_DEVICE:
         /* + HDM */
         init_cap_reg(HDM, 5, 1);
-        hdm_init_common(reg_state, write_msk, type, bi);
+        hdm_init_common(reg_state, write_msk, type, bi, uio);
         /* fallthrough */
     case CXL2_DOWNSTREAM_PORT:
     case CXL2_DEVICE:
