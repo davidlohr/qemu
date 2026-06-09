@@ -37,7 +37,28 @@ struct PCIEPort {
 
     /* pci express switch port */
     uint8_t     port;
+
+    /*
+     * This field declares Streamlined Virtual Channel (SVC) capability.
+     * Per PCIe 6.4 specification section 7.9.29, a pcie port supports
+     * upto 8 SVCs, in that SVC0 is a default one, SVC3 is for UIO traffic
+     * and SVC 4 is shared by both UIO and non-UIO traffic.
+     */
+    uint32_t    svc;
 };
+
+#define UIO_MANDATORY_SVC 3
+#define UIO_OPTIONAL_SVC 4
+
+static inline bool get_uio_mandatory_svc(PCIEPort *port)
+{
+    return (port->svc >> UIO_MANDATORY_SVC) & 1;
+}
+
+static inline bool get_uio_optional_svc(PCIEPort *port)
+{
+    return (port->svc >> UIO_OPTIONAL_SVC) & 1;
+}
 
 void pcie_port_init_reg(PCIDevice *d);
 
