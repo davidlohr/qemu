@@ -30,6 +30,7 @@
 #include "hw/pci/pci_bridge.h"
 #include "hw/pci/pci_bus.h"
 #include "hw/pci/pci_host.h"
+#include "hw/pci/pcie_svc.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/core/qdev-properties-system.h"
 #include "migration/cpr.h"
@@ -589,6 +590,7 @@ static void pci_do_device_reset(PCIDevice *dev)
     msi_reset(dev);
     msix_reset(dev);
     pcie_sriov_pf_reset(dev);
+    pcie_svc_cap_reset(dev);
 }
 
 /*
@@ -1840,6 +1842,8 @@ void pci_default_write_config(PCIDevice *d, uint32_t addr, uint32_t val_in, int 
     msi_write_config(d, addr, val_in, l);
     msix_write_config(d, addr, val_in, l);
     pcie_sriov_config_write(d, addr, val_in, l);
+    pcie_cap_flit_write_config(d, addr, val_in, l);
+    pcie_svc_cap_write_config(d, addr, val_in, l);
 }
 
 /***********************************************************/

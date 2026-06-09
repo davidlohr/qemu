@@ -112,8 +112,9 @@ pcie_cap_v1_fill(PCIDevice *dev, uint8_t port, uint8_t type, uint8_t version)
 }
 
 /* Includes setting the target speed default */
-static void pcie_cap_fill_lnk(uint8_t *exp_cap, PCIExpLinkWidth width,
-                              PCIExpLinkSpeed speed, bool flitmode)
+static void pcie_cap_fill_lnk(PCIDevice *dev, uint8_t *exp_cap,
+                              PCIExpLinkWidth width, PCIExpLinkSpeed speed,
+                              bool flitmode)
 {
     /* Clear and fill LNKCAP from what was configured above */
     pci_long_test_and_clear_mask(exp_cap + PCI_EXP_LNKCAP,
@@ -160,8 +161,14 @@ static void pcie_cap_fill_lnk(uint8_t *exp_cap, PCIExpLinkWidth width,
     }
 
     if (flitmode) {
-        pci_long_test_and_set_mask(exp_cap + PCI_EXP_LNKSTA2,
+        uint32_t pos = dev->exp.exp_cap;
+
+        pci_word_test_and_set_mask(exp_cap + PCI_EXP_LNKSTA2,
                                    PCI_EXP_LNKSTA2_FLIT);
+        pci_word_test_and_set_mask(exp_cap + PCI_EXP_FLAGS,
+                                   PCI_EXP_FLAGS_FLIT);
+        pci_word_test_and_set_mask(dev->wmask + pos + PCI_EXP_LNKCTL,
+                                   PCI_EXP_LNKCTL_FLIT_DIS);
     }
 }
 
@@ -180,8 +187,43 @@ void pcie_cap_fill_link_ep_usp(PCIDevice *dev, PCIExpLinkWidth width,
                                QEMU_PCI_EXP_LNKSTA_NLW(width) |
                                QEMU_PCI_EXP_LNKSTA_CLS(speed));
 
-    pcie_cap_fill_lnk(exp_cap, width, speed, flitmode);
+    pcie_cap_fill_lnk(dev, exp_cap, width, speed, flitmode);
 }
+
+void pcie_cap_flit_write_config(PCIDevice *dev, uint32_t addr, uint32_t val,
+                                int len)
+{
+    uint8_t *exp_cap;
+    uint16_t lnksta2;
+    uint16_t lnkctl;
+    uint16_t flags;
+
+    if (!pci_is_express(dev) || !dev->exp.exp_cap) {
+        return;
+    }
+
+    if (!ranges_overlap(addr, len,
+                        dev->exp.exp_cap + PCI_EXP_LNKCTL, 2)) {
+        return;
+    }
+
+    exp_cap = dev->config + dev->exp.exp_cap;
+    flags = pci_get_word(exp_cap + PCI_EXP_FLAGS);
+    if (!(flags & PCI_EXP_FLAGS_FLIT)) {
+        return;
+    }
+
+    lnkctl = pci_get_word(exp_cap + PCI_EXP_LNKCTL);
+    lnksta2 = pci_get_word(exp_cap + PCI_EXP_LNKSTA2);
+
+    if (lnkctl & PCI_EXP_LNKCTL_FLIT_DIS) {
+        lnksta2 &= ~PCI_EXP_LNKSTA2_FLIT;
+    } else {
+        lnksta2 |= PCI_EXP_LNKSTA2_FLIT;
+    }
+
+    pci_set_word(exp_cap + PCI_EXP_LNKSTA2, lnksta2);
+ }
 
 static void pcie_cap_fill_slot_lnk(PCIDevice *dev)
 {
@@ -217,7 +259,8 @@ static void pcie_cap_fill_slot_lnk(PCIDevice *dev)
         /* the PCI_EXP_LNKSTA_DLLLA will be set in the hotplug function */
     }
 
-    pcie_cap_fill_lnk(exp_cap, s->width, s->speed, PCIE_PORT(s)->flitmode);
+    pcie_cap_fill_lnk(dev, exp_cap, s->width, s->speed,
+                      PCIE_PORT(s)->flitmode);
 }
 
 int pcie_cap_init(PCIDevice *dev, uint8_t offset,

@@ -81,6 +81,7 @@ typedef enum PCIExpLinkWidth {
 #define PCI_EXP_DEVCAP2_EETLPP          0x200000
 
 #define PCI_EXP_DEVCTL2_EETLPPB         0x8000
+#define  PCI_EXP_LNKCTL_FLIT_DIS        0x2000
 
 /* ARI */
 #define PCI_ARI_VER                     1
