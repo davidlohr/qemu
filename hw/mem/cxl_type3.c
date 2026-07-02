@@ -323,6 +323,7 @@ static void ct3d_config_write(PCIDevice *pci_dev, uint32_t addr, uint32_t val,
 
     pcie_doe_write_config(&ct3d->doe_cdat, addr, val, size);
     pci_default_write_config(pci_dev, addr, val, size);
+    pcie_cap_flr_write_config(pci_dev, addr, val, size);
     pcie_aer_write_config(pci_dev, addr, val, size);
 }
 
@@ -951,6 +952,7 @@ static void ct3_realize(PCIDevice *pci_dev, Error **errp)
 
     init_alert_config(ct3d);
     pcie_cap_deverr_init(pci_dev);
+    pcie_cap_flr_init(pci_dev);
     /* Leave a bit of room for expansion */
     rc = pcie_aer_init(pci_dev, PCI_ERR_VER, 0x200, PCI_ERR_SIZEOF, errp);
     if (rc) {
