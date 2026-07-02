@@ -1311,7 +1311,11 @@ void pcie_ats_init(PCIDevice *dev, uint16_t offset, bool aligned)
 void pcie_dev3_init(PCIDevice *dev, uint16_t offset,
                     bool uio_cpl, bool uio_req)
 {
-    uint32_t cap = 0;
+    /*
+     * 14-Bit Tag Completer Supported MUST@FLIT be Set (PCIe 6.4 Table
+     * 7-109), and every device modeled here operates in Flit Mode.
+     */
+    uint32_t cap = PCI_DEV3_CAP_14BIT_TAG_CPL;
 
     pcie_add_capability(dev, PCI_EXT_CAP_ID_DEV3, PCI_DEV3_VER,
                         offset, PCI_DEV3_SIZEOF);
@@ -1320,7 +1324,7 @@ void pcie_dev3_init(PCIDevice *dev, uint16_t offset,
         cap |= PCI_DEV3_CAP_UIO_MEM_CPL;
     }
     if (uio_req) {
-        cap |= PCI_DEV3_CAP_UIO_MEM_REQ;
+        cap |= PCI_DEV3_CAP_UIO_MEM_REQ | PCI_DEV3_CAP_14BIT_TAG_REQ;
     }
     pci_set_long(dev->config + offset + PCI_DEV3_CAP, cap);
 

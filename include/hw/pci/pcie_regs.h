@@ -89,6 +89,8 @@ typedef enum PCIExpLinkWidth {
  */
 #define PCI_DEV3_VER                    1
 #define PCI_DEV3_SIZEOF                 0x10
+#define PCI_DEV3_CAP_14BIT_TAG_CPL      0x00000002
+#define PCI_DEV3_CAP_14BIT_TAG_REQ      0x00000004
 #define PCI_DEV3_CAP_UIO_MEM_CPL        0x00000400
 #define PCI_DEV3_CAP_UIO_MEM_REQ        0x00000800
 #define PCI_DEV3_CTL_UIO_REQ_EN         0x00000080

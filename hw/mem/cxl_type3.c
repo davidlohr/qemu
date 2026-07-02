@@ -17,6 +17,7 @@
 #include "hw/mem/memory-device.h"
 #include "hw/mem/pc-dimm.h"
 #include "hw/pci/pci.h"
+#include "hw/pci/pcie_svc.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/core/qdev-properties-system.h"
 #include "qapi/error.h"
@@ -966,6 +967,14 @@ static void ct3_realize(PCIDevice *pci_dev, Error **errp)
     if (ct3d->uio_capable || ct3d->uio_req_capable) {
         pcie_dev3_init(pci_dev, 0x300, ct3d->uio_capable,
                        ct3d->uio_req_capable);
+        /*
+         * Ports containing UIO Requester/Completer Functions must
+         * implement SVC to map TC3 onto the UIO VC on their side of
+         * the Link (PCIe 6.4 sec 2.5, 7.9.29).
+         */
+        if (pcie_svc_cap_init(pci_dev, 0x340, errp) == 0) {
+            pcie_svc_set_vc4(pci_dev, true);
+        }
     }
     if (ct3d->ats) {
         pcie_ats_init(pci_dev, 0x320, true);
