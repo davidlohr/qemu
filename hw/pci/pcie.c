@@ -1302,6 +1302,35 @@ void pcie_ats_init(PCIDevice *dev, uint16_t offset, bool aligned)
     pci_set_word(dev->wmask + dev->exp.ats_cap + PCI_ATS_CTRL, 0x800f);
 }
 
+/*
+ * Device 3 Extended Capability (PCIe 6.4 sec 7.7.9). Only the UIO role
+ * capability bits are modeled: DevCap3 UIO Mem RdWr Completer/Requester
+ * Supported, and, for requester capable functions, the DevCtl3 UIO
+ * Requester Enable and 256B Boundary Disable controls (default 0).
+ */
+void pcie_dev3_init(PCIDevice *dev, uint16_t offset,
+                    bool uio_cpl, bool uio_req)
+{
+    uint32_t cap = 0;
+
+    pcie_add_capability(dev, PCI_EXT_CAP_ID_DEV3, PCI_DEV3_VER,
+                        offset, PCI_DEV3_SIZEOF);
+
+    if (uio_cpl) {
+        cap |= PCI_DEV3_CAP_UIO_MEM_CPL;
+    }
+    if (uio_req) {
+        cap |= PCI_DEV3_CAP_UIO_MEM_REQ;
+    }
+    pci_set_long(dev->config + offset + PCI_DEV3_CAP, cap);
+
+    if (uio_req) {
+        pci_long_test_and_set_mask(dev->wmask + offset + PCI_DEV3_CTL,
+                                   PCI_DEV3_CTL_UIO_REQ_EN |
+                                   PCI_DEV3_CTL_UIO_256B_DIS);
+    }
+}
+
 /* ACS (Access Control Services) */
 void pcie_acs_init(PCIDevice *dev, uint16_t offset)
 {

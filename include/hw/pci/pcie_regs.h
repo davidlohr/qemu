@@ -83,6 +83,17 @@ typedef enum PCIExpLinkWidth {
 #define PCI_EXP_DEVCTL2_EETLPPB         0x8000
 #define  PCI_EXP_LNKCTL_FLIT_DIS        0x2000
 
+/*
+ * Device 3 Extended Capability UIO fields (PCIe 6.4 sec 7.7.9), not
+ * yet in the standard-headers import of pci_regs.h.
+ */
+#define PCI_DEV3_VER                    1
+#define PCI_DEV3_SIZEOF                 0x10
+#define PCI_DEV3_CAP_UIO_MEM_CPL        0x00000400
+#define PCI_DEV3_CAP_UIO_MEM_REQ        0x00000800
+#define PCI_DEV3_CTL_UIO_REQ_EN         0x00000080
+#define PCI_DEV3_CTL_UIO_256B_DIS       0x00000100
+
 /* ARI */
 #define PCI_ARI_VER                     1
 #define PCI_ARI_SIZEOF                  8

@@ -733,6 +733,8 @@ struct CXLType3Dev {
     bool flitmode;
     bool uio_capable;
     bool uio_enabled;
+    bool uio_req_capable;
+    bool ats;
 
     /* DOE */
     DOECap doe_cdat;

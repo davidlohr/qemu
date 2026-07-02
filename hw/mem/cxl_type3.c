@@ -955,6 +955,22 @@ static void ct3_realize(PCIDevice *pci_dev, Error **errp)
     if (rc) {
         goto err_release_cdat;
     }
+
+    /*
+     * UIO roles (PCIe 6.4 sec 6.34): DevCap3 completer bit tracks the
+     * HDM decoder UIO capability (x-uio); the requester role
+     * (x-uio-req) additionally exposes the DevCtl3 requester enable.
+     * ATS (x-ats) is required of UIO requesters targeting CXL HDM,
+     * where the UIO address match operates on translated addresses.
+     */
+    if (ct3d->uio_capable || ct3d->uio_req_capable) {
+        pcie_dev3_init(pci_dev, 0x300, ct3d->uio_capable,
+                       ct3d->uio_req_capable);
+    }
+    if (ct3d->ats) {
+        pcie_ats_init(pci_dev, 0x320, true);
+    }
+
     cxl_event_init(&ct3d->cxl_dstate, CXL_T3_MSIX_EVENT_START);
 
     /* Set default value for patrol scrub attributes */
@@ -1374,6 +1390,8 @@ static const Property ct3_props[] = {
     DEFINE_PROP_BOOL("x-256b-flit", CXLType3Dev, flitmode, false),
     DEFINE_PROP_BOOL("hdm-db", CXLType3Dev, hdmdb, false),
     DEFINE_PROP_BOOL("x-uio", CXLType3Dev, uio_capable, false),
+    DEFINE_PROP_BOOL("x-uio-req", CXLType3Dev, uio_req_capable, false),
+    DEFINE_PROP_BOOL("x-ats", CXLType3Dev, ats, false),
 };
 
 static uint64_t get_lsa_size(CXLType3Dev *ct3d)

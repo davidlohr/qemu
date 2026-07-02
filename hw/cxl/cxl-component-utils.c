@@ -550,7 +550,8 @@ void cxl_component_create_dvsec(CXLComponentState *cxl,
     case NON_CXL_FUNCTION_MAP_DVSEC:
         break; /* Not yet implemented */
     case EXTENSIONS_PORT_DVSEC:
-        wmask[offset + offsetof(CXLDVSECPortExt, control)] = 0x0F;
+        /* Includes UIO To HDM Enable (bit 4, default 0) */
+        wmask[offset + offsetof(CXLDVSECPortExt, control)] = 0x1F;
         wmask[offset + offsetof(CXLDVSECPortExt, control) + 1] = 0x40;
         wmask[offset + offsetof(CXLDVSECPortExt, alt_bus_base)] = 0xFF;
         wmask[offset + offsetof(CXLDVSECPortExt, alt_bus_limit)] = 0xFF;

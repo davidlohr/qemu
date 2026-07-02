@@ -120,6 +120,7 @@ QEMU_BUILD_BUG_ON(sizeof(CXLDVSECPortExt) != 0x28);
 #define PORT_CONTROL_OFFSET          0xc
 #define PORT_CONTROL_UNMASK_SBR      1
 #define PORT_CONTROL_ALT_MEMID_EN    4
+#define PORT_CONTROL_UIO_TO_HDM_EN   0x10
 
 /*
  * CXL r3.1 Section 8.1.6: GPF DVSEC for CXL Port
