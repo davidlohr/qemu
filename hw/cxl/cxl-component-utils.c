@@ -350,8 +350,15 @@ static void hdm_init_common(uint32_t *reg_state, uint32_t *write_msk,
     }
     has_uio = (type == CXL2_TYPE3_DEVICE || type == CXL2_UPSTREAM_PORT) && uio;
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY, UIO, has_uio);
+    /*
+     * UIO Capable Decoder Count is reserved for CXL.mem devices: a
+     * UIO-capable device must not limit the number of UIO-capable
+     * decoders (CXL r4.0 Table 8-116).
+     */
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY,
-                     UIO_DECODER_COUNT, has_uio ? decoder_count : 0);
+                     UIO_DECODER_COUNT,
+                     has_uio && type == CXL2_UPSTREAM_PORT ?
+                     decoder_count : 0);
     if (has_uio) {
         ctrl_mask |= CXL_HDM_DECODER_CTRL_UIO_WRMASK;
     }
