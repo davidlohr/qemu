@@ -557,8 +557,12 @@ void cxl_component_create_dvsec(CXLComponentState *cxl,
     case NON_CXL_FUNCTION_MAP_DVSEC:
         break; /* Not yet implemented */
     case EXTENSIONS_PORT_DVSEC:
-        /* Includes UIO To HDM Enable (bit 4, default 0) */
-        wmask[offset + offsetof(CXLDVSECPortExt, control)] = 0x1F;
+        /*
+         * UIO To HDM Enable (bit 4, default 0) is RW in Switch
+         * Downstream Ports only; RsvdP elsewhere (CXL r4.0 Table 8-32).
+         */
+        wmask[offset + offsetof(CXLDVSECPortExt, control)] =
+            type == CXL2_DOWNSTREAM_PORT ? 0x1F : 0x0F;
         wmask[offset + offsetof(CXLDVSECPortExt, control) + 1] = 0x40;
         wmask[offset + offsetof(CXLDVSECPortExt, alt_bus_base)] = 0xFF;
         wmask[offset + offsetof(CXLDVSECPortExt, alt_bus_limit)] = 0xFF;
