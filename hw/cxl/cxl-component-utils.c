@@ -22,10 +22,12 @@
      R_CXL_HDM_DECODER0_CTRL_TYPE_MASK |         \
      R_CXL_HDM_DECODER0_CTRL_BI_MASK)
 
-/* Writable only when the component is UIO capable */
-#define CXL_HDM_DECODER_CTRL_UIO_WRMASK          \
-    (R_CXL_HDM_DECODER0_CTRL_UIO_MASK |          \
-     R_CXL_HDM_DECODER0_CTRL_UIG_MASK |          \
+/*
+ * Upstream reverse-decode fields: writable in switches/Host Bridges
+ * when UIO capable; reserved for CXL.mem devices (Table 8-123).
+ */
+#define CXL_HDM_DECODER_CTRL_UIO_SW_WRMASK       \
+    (R_CXL_HDM_DECODER0_CTRL_UIG_MASK |          \
      R_CXL_HDM_DECODER0_CTRL_UIW_MASK |          \
      R_CXL_HDM_DECODER0_CTRL_ISP_MASK)
 
@@ -359,8 +361,21 @@ static void hdm_init_common(uint32_t *reg_state, uint32_t *write_msk,
                      UIO_DECODER_COUNT,
                      has_uio && type == CXL2_UPSTREAM_PORT ?
                      decoder_count : 0);
+    /*
+     * Decoder control write-masks follow Table 8-123 attributes:
+     * UIO bit RWL when UIO capable; UIG/UIW/ISP RWL in switches when
+     * UIO capable (reserved for devices); ISP additionally RWL in
+     * BI-capable devices - BISnp addresses are HPAs, so interleaved
+     * devices resolve DPA->HPA through it.
+     */
     if (has_uio) {
-        ctrl_mask |= CXL_HDM_DECODER_CTRL_UIO_WRMASK;
+        ctrl_mask |= R_CXL_HDM_DECODER0_CTRL_UIO_MASK;
+    }
+    if (has_uio && type == CXL2_UPSTREAM_PORT) {
+        ctrl_mask |= CXL_HDM_DECODER_CTRL_UIO_SW_WRMASK;
+    }
+    if (type == CXL2_TYPE3_DEVICE && bi) {
+        ctrl_mask |= R_CXL_HDM_DECODER0_CTRL_ISP_MASK;
     }
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY, MEMDATA_NXM_CAP, 0);
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY,
