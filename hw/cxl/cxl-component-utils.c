@@ -311,6 +311,7 @@ static void hdm_init_common(uint32_t *reg_state, uint32_t *write_msk,
 {
     int decoder_count = CXL_HDM_DECODER_COUNT;
     int hdm_inc = R_CXL_HDM_DECODER1_BASE_LO - R_CXL_HDM_DECODER0_BASE_LO;
+    uint32_t ctrl_mask = 0x13ff;
     int i;
 
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY, DECODER_COUNT,
@@ -335,6 +336,9 @@ static void hdm_init_common(uint32_t *reg_state, uint32_t *write_msk,
                      SUPPORTED_COHERENCY_MODEL,
                      /* host+dev or Unknown */
                      type == CXL2_TYPE3_DEVICE && bi ? 3 : 0);
+    if (type == CXL2_TYPE3_DEVICE && bi) {
+        ctrl_mask |= R_CXL_HDM_DECODER0_CTRL_BI_MASK;
+    }
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_GLOBAL_CONTROL,
                      HDM_DECODER_ENABLE, 0);
     write_msk[R_CXL_HDM_DECODER_GLOBAL_CONTROL] = 0x3;
@@ -343,7 +347,7 @@ static void hdm_init_common(uint32_t *reg_state, uint32_t *write_msk,
         write_msk[R_CXL_HDM_DECODER0_BASE_HI + i * hdm_inc] = 0xffffffff;
         write_msk[R_CXL_HDM_DECODER0_SIZE_LO + i * hdm_inc] = 0xf0000000;
         write_msk[R_CXL_HDM_DECODER0_SIZE_HI + i * hdm_inc] = 0xffffffff;
-        write_msk[R_CXL_HDM_DECODER0_CTRL + i * hdm_inc] = 0x13ff;
+        write_msk[R_CXL_HDM_DECODER0_CTRL + i * hdm_inc] = ctrl_mask;
         if (type == CXL2_DEVICE ||
             type == CXL2_TYPE3_DEVICE ||
             type == CXL2_LOGICAL_DEVICE) {
