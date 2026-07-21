@@ -17,6 +17,9 @@
 #include "hw/mem/memory-device.h"
 #include "hw/mem/pc-dimm.h"
 #include "hw/pci/pci.h"
+#include "hw/pci/pci_bridge.h"
+#include "hw/pci/pci_host.h"
+#include "hw/pci/pcie_port.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/core/qdev-properties-system.h"
 #include "qapi/error.h"
@@ -855,6 +858,26 @@ static bool cxl_setup_memory(CXLType3Dev *ct3d, Error **errp)
         }
     }
 
+    if (ct3d->committed) {
+        if (strcmp(ct3d->committed, "hdm-h") &&
+            strcmp(ct3d->committed, "hdm-db")) {
+            error_setg(errp, "x-committed must be 'hdm-h' or 'hdm-db'");
+            return false;
+        }
+        if (!ct3d->hostvmem || ct3d->hostpmem || ct3d->dc.num_regions) {
+            error_setg(errp, "x-committed requires a volatile-only device");
+            return false;
+        }
+        if (!QEMU_IS_ALIGNED(ct3d->cxl_dstate.vmem_size, 256 * MiB)) {
+            error_setg(errp, "x-committed requires a 256MiB multiple memdev");
+            return false;
+        }
+        if (!strcmp(ct3d->committed, "hdm-db") && !ct3d->hdmdb) {
+            error_setg(errp, "x-committed=hdm-db requires hdm-db");
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -1318,6 +1341,147 @@ MemTxResult cxl_type3_write(PCIDevice *d, hwaddr host_addr, uint64_t data,
     return address_space_write(as, dpa_offset, attrs, &data, size);
 }
 
+static bool ct3d_under_hb(CXLType3Dev *ct3d, PCIBus *hb_bus)
+{
+    PCIBus *bus = pci_get_bus(PCI_DEVICE(ct3d));
+    PCIDevice *br;
+
+    while (bus) {
+        if (bus == hb_bus) {
+            return true;
+        }
+        br = pci_bridge_get_device(bus);
+        bus = br ? pci_get_bus(br) : NULL;
+    }
+
+    return false;
+}
+
+struct committed_fmw_sel {
+    CXLType3Dev *ct3d;
+    bool bi;
+    CXLFixedWindow *match;
+    CXLFixedWindow *fallback;
+};
+
+static int ct3d_committed_pick_fmw(Object *obj, void *opaque)
+{
+    struct committed_fmw_sel *sel = opaque;
+    CXLFixedWindow *fw;
+    int i;
+
+    if (!object_dynamic_cast(obj, TYPE_CXL_FMW)) {
+        return 0;
+    }
+
+    fw = CXL_FMW(obj);
+    for (i = 0; i < fw->num_targets; i++) {
+        PCIHostState *hb;
+
+        if (!fw->target_hbs[i]) {
+            continue;
+        }
+        hb = PCI_HOST_BRIDGE(fw->target_hbs[i]->cxl_host_bridge);
+        if (!ct3d_under_hb(sel->ct3d, hb->bus)) {
+            continue;
+        }
+        if (!sel->fallback || fw->index < sel->fallback->index) {
+            sel->fallback = fw;
+        }
+        if (fw->restrictions & (sel->bi ? CXL_FMW_BI : CXL_FMW_HOST_ONLY)) {
+            if (!sel->match || fw->index < sel->match->index) {
+                sel->match = fw;
+            }
+        }
+        break;
+    }
+
+    return 0;
+}
+
+/*
+ * Emulate firmware having programmed and committed HDM decoder 0 before
+ * OS handoff: the volatile memdev is mapped 1:1 (x1, 256B granularity) at
+ * the base of a fixed memory window targeting this device's host bridge,
+ * the decoder is marked committed and the HDM decoder capability enabled.
+ * With x-committed=hdm-db the decoder operates in BI mode and the device
+ * comes up with BI enabled.  The lowest-index window whose restrictions
+ * match the decode mode is used, falling back to the lowest-index window
+ * targeting the host bridge (emulating firmware that committed a decoder
+ * under an incompatible window).
+ *
+ * Only a directly attached device under a passthrough (single root port)
+ * host bridge is supported: any other topology has decoders on the path
+ * that would also need to be committed.
+ */
+static void ct3d_committed_decoder_init(CXLType3Dev *ct3d)
+{
+    uint32_t *cache_mem = ct3d->cxl_cstate.crb.cache_mem_registers;
+    struct committed_fmw_sel sel = {
+        .ct3d = ct3d,
+        .bi = !strcmp(ct3d->committed, "hdm-db"),
+    };
+    PCIDevice *br;
+    CXLFixedWindow *fw;
+    uint64_t base, size;
+    uint32_t ctrl = 0;
+    int nbr;
+
+    object_child_foreach_recursive(object_get_root(),
+                                   ct3d_committed_pick_fmw, &sel);
+    fw = sel.match ?: sel.fallback;
+    if (!fw) {
+        warn_report_once("cxl-type3: x-committed: no fixed memory window "
+                         "targets this device's host bridge");
+        return;
+    }
+
+    for (br = pci_bridge_get_device(pci_get_bus(PCI_DEVICE(ct3d))), nbr = 0;
+         br && !object_dynamic_cast(OBJECT(br), TYPE_PXB_CXL_DEV);
+         br = pci_bridge_get_device(pci_get_bus(br))) {
+        nbr++;
+    }
+    /*
+     * Passthrough is evaluated directly rather than through
+     * cxl_get_hb_passthrough(): the host bridge caches that state
+     * lazily across resets and it is not yet valid on the initial one.
+     */
+    if (!br || nbr != 1 || PXB_CXL_DEV(br)->hdm_for_passthrough ||
+        pcie_count_ds_ports(
+            PCI_HOST_BRIDGE(PXB_CXL_DEV(br)->cxl_host_bridge)->bus) != 1) {
+        warn_report_once("cxl-type3: x-committed: only directly attached "
+                         "devices under a passthrough host bridge are "
+                         "supported");
+        return;
+    }
+
+    base = fw->base;
+    size = ct3d->cxl_dstate.vmem_size;
+
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_BASE_LO, base & 0xffffffff);
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_BASE_HI, base >> 32);
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_SIZE_LO, size & 0xffffffff);
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_SIZE_HI, size >> 32);
+
+    /* IG 256B, IW x1 */
+    ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, COMMITTED, 1);
+    if (sel.bi) {
+        ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, BI, 1);
+    } else {
+        ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, TYPE, 1);
+    }
+    stl_le_p(cache_mem + R_CXL_HDM_DECODER0_CTRL, ctrl);
+
+    ARRAY_FIELD_DP32(cache_mem, CXL_HDM_DECODER_GLOBAL_CONTROL,
+                     HDM_DECODER_ENABLE, 1);
+
+    if (sel.bi) {
+        ARRAY_FIELD_DP32(cache_mem, CXL_BI_DECODER_CTRL, BI_ENABLE, 1);
+    }
+
+    cfmws_update_non_interleaved(true);
+}
+
 static void ct3d_reset(DeviceState *dev)
 {
     CXLType3Dev *ct3d = CXL_TYPE3(dev);
@@ -1345,6 +1509,10 @@ static void ct3d_reset(DeviceState *dev)
     }
     cxl_initialize_t3_ld_cci(&ct3d->ld0_cci, DEVICE(ct3d), DEVICE(ct3d),
                              512); /* Max payload made up */
+
+    if (ct3d->committed) {
+        ct3d_committed_decoder_init(ct3d);
+    }
 }
 
 static const Property ct3_props[] = {
@@ -1367,6 +1535,7 @@ static const Property ct3_props[] = {
                                 width, PCIE_LINK_WIDTH_16),
     DEFINE_PROP_BOOL("x-256b-flit", CXLType3Dev, flitmode, false),
     DEFINE_PROP_BOOL("hdm-db", CXLType3Dev, hdmdb, false),
+    DEFINE_PROP_STRING("x-committed", CXLType3Dev, committed),
 };
 
 static uint64_t get_lsa_size(CXLType3Dev *ct3d)

@@ -712,6 +712,7 @@ struct CXLType3Dev {
     HostMemoryBackend *hostpmem;
     HostMemoryBackend *lsa;
     uint64_t sn;
+    char *committed;
 
     /* State */
     MemoryRegion direct_mr[CXL_HDM_DECODER_COUNT];
