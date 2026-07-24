@@ -878,6 +878,18 @@ static bool cxl_setup_memory(CXLType3Dev *ct3d, Error **errp)
         }
     }
 
+    if (ct3d->committed_ways != 1) {
+        if (!ct3d->committed) {
+            error_setg(errp, "x-committed-ways requires x-committed");
+            return false;
+        }
+        if (!is_power_of_2(ct3d->committed_ways) ||
+            ct3d->committed_ways > 16) {
+            error_setg(errp, "x-committed-ways must be a power of 2, <= 16");
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -1455,15 +1467,35 @@ static void ct3d_committed_decoder_init(CXLType3Dev *ct3d)
         return;
     }
 
+    /*
+     * A multi-device interleave set can only mirror the window's own
+     * routing: there are no intermediate decoders on a passthrough
+     * path to split the set any further, so the endpoint stride must
+     * equal the window stride (ways == window targets, window
+     * granularity).  Every set member computes identical base/size
+     * from the shared window.
+     */
+    if (ct3d->committed_ways > 1 &&
+        fw->num_targets != ct3d->committed_ways) {
+        warn_report_once("cxl-type3: x-committed-ways=%d: selected window "
+                         "has %d target(s); set must match the window",
+                         ct3d->committed_ways, fw->num_targets);
+        return;
+    }
+
     base = fw->base;
-    size = ct3d->cxl_dstate.vmem_size;
+    size = (uint64_t)ct3d->committed_ways * ct3d->cxl_dstate.vmem_size;
 
     stl_le_p(cache_mem + R_CXL_HDM_DECODER0_BASE_LO, base & 0xffffffff);
     stl_le_p(cache_mem + R_CXL_HDM_DECODER0_BASE_HI, base >> 32);
     stl_le_p(cache_mem + R_CXL_HDM_DECODER0_SIZE_LO, size & 0xffffffff);
     stl_le_p(cache_mem + R_CXL_HDM_DECODER0_SIZE_HI, size >> 32);
 
-    /* IG 256B, IW x1 */
+    /* x1: IG 256B, IW x1; ways > 1: mirror the window's routing */
+    if (ct3d->committed_ways > 1) {
+        ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, IW, fw->enc_int_ways);
+        ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, IG, fw->enc_int_gran);
+    }
     ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, COMMITTED, 1);
     if (sel.bi) {
         ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, BI, 1);
@@ -1536,6 +1568,7 @@ static const Property ct3_props[] = {
     DEFINE_PROP_BOOL("x-256b-flit", CXLType3Dev, flitmode, false),
     DEFINE_PROP_BOOL("hdm-db", CXLType3Dev, hdmdb, false),
     DEFINE_PROP_STRING("x-committed", CXLType3Dev, committed),
+    DEFINE_PROP_UINT8("x-committed-ways", CXLType3Dev, committed_ways, 1),
 };
 
 static uint64_t get_lsa_size(CXLType3Dev *ct3d)
