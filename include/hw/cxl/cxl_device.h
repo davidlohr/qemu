@@ -778,6 +778,7 @@ struct CXLType3Dev {
 
     /* BI flows */
     bool hdmdb;
+    bool coherency_unknown;
 
     struct dynamic_capacity {
         HostMemoryBackend *host_dc;

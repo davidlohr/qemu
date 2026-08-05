@@ -1524,6 +1524,15 @@ static void ct3d_reset(DeviceState *dev)
                               ct3d->flitmode);
     cxl_component_register_init_common(reg_state, write_msk,
                                        CXL2_TYPE3_DEVICE, ct3d->hdmdb);
+    /*
+     * Test knob: keep BI capability but decline to report the coherency
+     * models, as a device is permitted to do (Unknown, CXL r4.0 Table
+     * 8-116).
+     */
+    if (ct3d->coherency_unknown) {
+        ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY,
+                         SUPPORTED_COHERENCY_MODEL, 0);
+    }
     cxl_device_register_init_t3(ct3d, CXL_T3_MSIX_MBOX);
 
     /*
@@ -1567,6 +1576,8 @@ static const Property ct3_props[] = {
                                 width, PCIE_LINK_WIDTH_16),
     DEFINE_PROP_BOOL("x-256b-flit", CXLType3Dev, flitmode, false),
     DEFINE_PROP_BOOL("hdm-db", CXLType3Dev, hdmdb, false),
+    DEFINE_PROP_BOOL("x-coherency-unknown", CXLType3Dev, coherency_unknown,
+                     false),
     DEFINE_PROP_STRING("x-committed", CXLType3Dev, committed),
     DEFINE_PROP_UINT8("x-committed-ways", CXLType3Dev, committed_ways, 1),
 };
