@@ -92,6 +92,19 @@ static void latch_registers(CXLUpstreamPort *usp)
     cxl_component_register_init_common(reg_state, write_msk,
                                        CXL2_UPSTREAM_PORT, usp->flitmode);
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY, TARGET_COUNT, 8);
+
+    /*
+     * Test knob: hand the OS a committed decoder whose interleave ways
+     * encoding is out of range for the 8 entry target list.
+     */
+    if (usp->committed_iw) {
+        stl_le_p(reg_state + R_CXL_HDM_DECODER0_BASE_LO, 0x10000000);
+        stl_le_p(reg_state + R_CXL_HDM_DECODER0_SIZE_LO, 0x10000000);
+        ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER0_CTRL, IG, 0);
+        ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER0_CTRL, IW,
+                         usp->committed_iw);
+        ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER0_CTRL, COMMITTED, 1);
+    }
 }
 
 static void cxl_usp_reset(DeviceState *qdev)
@@ -372,6 +385,7 @@ static const Property cxl_upstream_props[] = {
     DEFINE_PROP_PCIE_LINK_WIDTH("x-width", CXLUpstreamPort,
                                 width, PCIE_LINK_WIDTH_16),
     DEFINE_PROP_BOOL("x-256b-flit", CXLUpstreamPort, flitmode, false),
+    DEFINE_PROP_UINT8("x-committed-iw", CXLUpstreamPort, committed_iw, 0),
 };
 
 static void cxl_upstream_class_init(ObjectClass *oc, const void *data)
