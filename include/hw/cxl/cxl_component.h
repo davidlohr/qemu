@@ -258,8 +258,16 @@ enum {
     CXL_BISTATE_MAX
 };
 
+/* Test knob: forced outcome of a BI RT / BI Decoder commit */
+enum {
+    CXL_BI_COMMIT_OK = 0,       /* Committed after the emulated delay */
+    CXL_BI_COMMIT_ERROR,        /* Error Not Committed after the delay */
+    CXL_BI_COMMIT_TIMEOUT,      /* neither bit ever sets */
+};
+
 typedef struct bi_state {
     uint64_t last_commit;  /* last 0->1 transition */
+    uint64_t commits;      /* commits requested since realize */
 } BIState;
 
 typedef struct component_registers {
@@ -307,7 +315,12 @@ typedef struct cxl_component {
 
     CDATObject cdat;
     BIState bi_state[CXL_BISTATE_MAX];
+    uint8_t bi_commit_fault[CXL_BISTATE_MAX];
+    /* fault only commits after this many succeed (0 = every commit) */
+    uint32_t bi_commit_fault_after[CXL_BISTATE_MAX];
 } CXLComponentState;
+
+int cxl_bi_commit_fault_parse(const char *fault, uint8_t *out, Error **errp);
 
 void cxl_component_register_block_init(Object *obj,
                                        CXLComponentState *cxl_cstate,

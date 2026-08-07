@@ -85,18 +85,33 @@ static uint64_t cxl_cache_mem_read_reg(void *opaque, hwaddr offset,
             if (started) {
                 uint32_t *cache_mem = cregs->cache_mem_registers;
                 uint32_t val = cache_mem[offset / 4];
+                int fault = cxl_cstate->bi_commit_fault[type];
                 uint64_t now;
-                int set;
+                int set, err;
 
                 now = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
                 /* arbitrary 100 ms to do the commit */
                 set = !!(now >= started + 100);
 
+                /* forced outcome (x-bi-commit-fault[-after]) */
+                if (cxl_cstate->bi_state[type].commits <=
+                    cxl_cstate->bi_commit_fault_after[type]) {
+                    fault = CXL_BI_COMMIT_OK;
+                }
+                err = fault == CXL_BI_COMMIT_ERROR ? set : 0;
+                if (fault != CXL_BI_COMMIT_OK) {
+                    set = 0;
+                }
+
                 if (offset == A_CXL_BI_RT_STATUS) {
                     val = FIELD_DP32(val, CXL_BI_RT_STATUS, COMMITTED, set);
+                    val = FIELD_DP32(val, CXL_BI_RT_STATUS,
+                                     ERR_NOT_COMMITTED, err);
                 } else {
                     val = FIELD_DP32(val, CXL_BI_DECODER_STATUS, COMMITTED,
                                      set);
+                    val = FIELD_DP32(val, CXL_BI_DECODER_STATUS,
+                                     ERR_NOT_COMMITTED, err);
                 }
                 stl_le_p((uint8_t *)cache_mem + offset, val);
             }
@@ -153,13 +168,29 @@ static void dumb_hdm_handler(CXLComponentState *cxl_cstate, hwaddr offset,
     }
 }
 
+/* Test knob plumbing: parse an x-bi-commit-fault property string */
+int cxl_bi_commit_fault_parse(const char *fault, uint8_t *out, Error **errp)
+{
+    if (!fault || !fault[0]) {
+        *out = CXL_BI_COMMIT_OK;
+    } else if (!strcmp(fault, "error")) {
+        *out = CXL_BI_COMMIT_ERROR;
+    } else if (!strcmp(fault, "timeout")) {
+        *out = CXL_BI_COMMIT_TIMEOUT;
+    } else {
+        error_setg(errp, "x-bi-commit-fault must be 'error' or 'timeout'");
+        return -1;
+    }
+    return 0;
+}
+
 /*
  * Downstream-port BI Decoder programming rules, Table 8-157: BI
  * Enable means a BI-capable device is connected directly to this
  * port; with a switch below, the port only forwards (BI FW). The
  * rule is the same for a Root Port and a Switch Downstream Port.
- * Flag guest programming that contradicts the topology
- * (-d guest_errors).
+ * A CXL device's BI FW bit is reserved. Flag guest programming that
+ * contradicts the topology (-d guest_errors).
  */
 static void bi_decoder_dport_check(CXLComponentState *cxl_cstate,
                                    uint32_t value)
@@ -177,6 +208,14 @@ static void bi_decoder_dport_check(CXLComponentState *cxl_cstate,
         return;
     }
     type = pcie_cap_get_type(pdev);
+    if (type == PCI_EXP_TYPE_ENDPOINT || type == PCI_EXP_TYPE_RC_END) {
+        if (fw) {
+            qemu_log_mask(LOG_GUEST_ERROR,
+                          "CXL %s: BI Forward set on a CXL device "
+                          "(reserved, Table 8-157)\n", pdev->name);
+        }
+        return;
+    }
     if (type != PCI_EXP_TYPE_ROOT_PORT && type != PCI_EXP_TYPE_DOWNSTREAM) {
         return;
     }
@@ -249,6 +288,7 @@ static void bi_handler(CXLComponentState *cxl_cstate, hwaddr offset,
     if (to_commit) {
         cxl_cstate->bi_state[type].last_commit =
                 qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
+        cxl_cstate->bi_state[type].commits++;
     }
 
     stl_le_p((uint8_t *)cache_mem + offset, value);

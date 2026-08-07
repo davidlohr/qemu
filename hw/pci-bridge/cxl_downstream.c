@@ -27,6 +27,8 @@ typedef struct CXLDownstreamPort {
     /*< public >*/
     CXLComponentState cxl_cstate;
     CXLPhyPortPerst perst;
+    char *bi_commit_fault;
+    uint32_t bi_commit_fault_after;
 } CXLDownstreamPort;
 
 #define CXL_DOWNSTREAM_PORT_MSI_OFFSET 0x70
@@ -154,6 +156,13 @@ static void cxl_dsp_realize(PCIDevice *d, Error **errp)
     MemoryRegion *component_bar = &cregs->component_registers;
     int rc;
 
+    if (cxl_bi_commit_fault_parse(dsp->bi_commit_fault,
+            &cxl_cstate->bi_commit_fault[CXL_BISTATE_DECODER], errp)) {
+        return;
+    }
+    cxl_cstate->bi_commit_fault_after[CXL_BISTATE_DECODER] =
+        dsp->bi_commit_fault_after;
+
     pci_bridge_initfn(d, TYPE_PCIE_BUS);
     pcie_port_init_reg(d);
 
@@ -228,6 +237,10 @@ static const Property cxl_dsp_props[] = {
     DEFINE_PROP_PCIE_LINK_WIDTH("x-width", PCIESlot,
                                 width, PCIE_LINK_WIDTH_16),
     DEFINE_PROP_BOOL("x-256b-flit", PCIESlot, flitmode, true),
+    DEFINE_PROP_STRING("x-bi-commit-fault", CXLDownstreamPort,
+                       bi_commit_fault),
+    DEFINE_PROP_UINT32("x-bi-commit-fault-after", CXLDownstreamPort,
+                       bi_commit_fault_after, 0),
 };
 
 static void cxl_dsp_class_init(ObjectClass *oc, const void *data)

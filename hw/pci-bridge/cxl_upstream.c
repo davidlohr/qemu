@@ -314,6 +314,13 @@ static void cxl_usp_realize(PCIDevice *d, Error **errp)
     MemoryRegion *component_bar = &cregs->component_registers;
     int rc;
 
+    if (cxl_bi_commit_fault_parse(usp->bi_commit_fault,
+            &cxl_cstate->bi_commit_fault[CXL_BISTATE_RT], errp)) {
+        return;
+    }
+    cxl_cstate->bi_commit_fault_after[CXL_BISTATE_RT] =
+        usp->bi_commit_fault_after;
+
     pci_bridge_initfn(d, TYPE_PCIE_BUS);
     pcie_port_init_reg(d);
 
@@ -386,6 +393,9 @@ static const Property cxl_upstream_props[] = {
                                 width, PCIE_LINK_WIDTH_16),
     DEFINE_PROP_BOOL("x-256b-flit", CXLUpstreamPort, flitmode, false),
     DEFINE_PROP_UINT8("x-committed-iw", CXLUpstreamPort, committed_iw, 0),
+    DEFINE_PROP_STRING("x-bi-commit-fault", CXLUpstreamPort, bi_commit_fault),
+    DEFINE_PROP_UINT32("x-bi-commit-fault-after", CXLUpstreamPort,
+                       bi_commit_fault_after, 0),
 };
 
 static void cxl_upstream_class_init(ObjectClass *oc, const void *data)

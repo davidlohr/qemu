@@ -19,6 +19,8 @@ typedef struct CXLUpstreamPort {
     PCIExpLinkWidth width;
     bool flitmode;
     uint8_t committed_iw;
+    char *bi_commit_fault;
+    uint32_t bi_commit_fault_after;
 
     DOECap doe_cdat;
     uint64_t sn;
