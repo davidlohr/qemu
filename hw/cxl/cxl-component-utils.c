@@ -11,6 +11,8 @@
 #include "qemu/log.h"
 #include "qapi/error.h"
 #include "hw/pci/pci.h"
+#include "hw/pci/pcie.h"
+#include "hw/pci/pci_bridge.h"
 #include "hw/cxl/cxl.h"
 
 /* CXL r3.1 Section 8.2.4.20.1 CXL HDM Decoder Capability Register */
@@ -151,6 +153,65 @@ static void dumb_hdm_handler(CXLComponentState *cxl_cstate, hwaddr offset,
     }
 }
 
+/*
+ * Downstream-port BI Decoder programming rules, Table 8-157: BI
+ * Enable means a BI-capable device is connected directly to this
+ * port; with a switch below, the port only forwards (BI FW). The
+ * rule is the same for a Root Port and a Switch Downstream Port.
+ * Flag guest programming that contradicts the topology
+ * (-d guest_errors).
+ */
+static void bi_decoder_dport_check(CXLComponentState *cxl_cstate,
+                                   uint32_t value)
+{
+    PCIDevice *pdev = cxl_cstate->pdev;
+    PCIDevice *child;
+    bool fw = FIELD_EX32(value, CXL_BI_DECODER_CTRL, BI_FW);
+    bool en = FIELD_EX32(value, CXL_BI_DECODER_CTRL, BI_ENABLE);
+    const char *what;
+    uint8_t type;
+    PCIBus *sec;
+    bool direct;
+
+    if (!pdev || !pci_is_express(pdev)) {
+        return;
+    }
+    type = pcie_cap_get_type(pdev);
+    if (type != PCI_EXP_TYPE_ROOT_PORT && type != PCI_EXP_TYPE_DOWNSTREAM) {
+        return;
+    }
+    what = type == PCI_EXP_TYPE_ROOT_PORT ? "Root Port" : "Downstream Port";
+
+    if (!fw && !en) {
+        return;
+    }
+    if (fw && en) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "CXL %s: BI Forward and BI Enable both set on a %s "
+                      "(Table 8-157)\n", pdev->name, what);
+        return;
+    }
+
+    sec = pci_bridge_get_sec_bus(PCI_BRIDGE(pdev));
+    child = pci_find_device(sec, pci_bus_num(sec), PCI_DEVFN(0, 0));
+    if (!child) {
+        return;
+    }
+    direct = !pci_is_express(child) ||
+             pcie_cap_get_type(child) != PCI_EXP_TYPE_UPSTREAM;
+
+    if (direct && fw) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "CXL %s: BI Forward set on a %s with a directly "
+                      "attached device, expects BI Enable (Table 8-157)\n",
+                      pdev->name, what);
+    } else if (!direct && en) {
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "CXL %s: BI Enable set on a %s above a switch, "
+                      "expects BI Forward (Table 8-157)\n", pdev->name, what);
+    }
+}
+
 static void bi_handler(CXLComponentState *cxl_cstate, hwaddr offset,
                             uint32_t value)
 {
@@ -171,6 +232,7 @@ static void bi_handler(CXLComponentState *cxl_cstate, hwaddr offset,
         }
         break;
     case A_CXL_BI_DECODER_CTRL:
+        bi_decoder_dport_check(cxl_cstate, value);
         to_commit = FIELD_EX32(value, CXL_BI_DECODER_CTRL, COMMIT);
         if (to_commit) {
             sts = cxl_cache_mem_read_reg(cxl_cstate,
