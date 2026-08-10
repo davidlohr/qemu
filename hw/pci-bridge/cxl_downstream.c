@@ -27,6 +27,7 @@ typedef struct CXLDownstreamPort {
     /*< public >*/
     CXLComponentState cxl_cstate;
     CXLPhyPortPerst perst;
+    bool bi_committed;
     char *bi_commit_fault;
     uint32_t bi_commit_fault_after;
 } CXLDownstreamPort;
@@ -45,6 +46,19 @@ static void latch_registers(CXLDownstreamPort *dsp)
 
     cxl_component_register_init_common(reg_state, write_msk,
                                        CXL2_DOWNSTREAM_PORT, true);
+
+    /*
+     * Test knob: present a BI Decoder that platform firmware already
+     * programmed and committed for the device below, i.e. steps 3 and
+     * 4 of the CXL r4.0 9.14.2 allocate flow are done. An OS may adopt
+     * the port as-is; whether that is sound also depends on the switch
+     * upstream port's route table (x-bi-rt-committed).
+     */
+    if (dsp->bi_committed) {
+        ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, BI_ENABLE, 1);
+        ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, BI_FW, 0);
+        ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_STATUS, COMMITTED, 1);
+    }
 }
 
 /* TODO: Look at sharing this code across all CXL port types */
@@ -237,6 +251,8 @@ static const Property cxl_dsp_props[] = {
     DEFINE_PROP_PCIE_LINK_WIDTH("x-width", PCIESlot,
                                 width, PCIE_LINK_WIDTH_16),
     DEFINE_PROP_BOOL("x-256b-flit", PCIESlot, flitmode, true),
+    DEFINE_PROP_BOOL("x-bi-committed", CXLDownstreamPort, bi_committed,
+                     false),
     DEFINE_PROP_STRING("x-bi-commit-fault", CXLDownstreamPort,
                        bi_commit_fault),
     DEFINE_PROP_UINT32("x-bi-commit-fault-after", CXLDownstreamPort,
