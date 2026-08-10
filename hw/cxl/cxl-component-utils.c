@@ -211,8 +211,8 @@ static void bi_decoder_dport_check(CXLComponentState *cxl_cstate,
     if (type == PCI_EXP_TYPE_ENDPOINT || type == PCI_EXP_TYPE_RC_END) {
         if (fw) {
             qemu_log_mask(LOG_GUEST_ERROR,
-                          "CXL %s: BI Forward set on a CXL device "
-                          "(reserved, Table 8-157)\n", pdev->name);
+                          "CXL BI oracle: %s: BI Forward set on a CXL "
+                          "device (reserved)\n", pdev->name);
         }
         return;
     }
@@ -226,8 +226,8 @@ static void bi_decoder_dport_check(CXLComponentState *cxl_cstate,
     }
     if (fw && en) {
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "CXL %s: BI Forward and BI Enable both set on a %s "
-                      "(Table 8-157)\n", pdev->name, what);
+                      "CXL BI oracle: %s: BI Forward and BI Enable both set "
+                      "on a %s\n", pdev->name, what);
         return;
     }
 
@@ -241,13 +241,13 @@ static void bi_decoder_dport_check(CXLComponentState *cxl_cstate,
 
     if (direct && fw) {
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "CXL %s: BI Forward set on a %s with a directly "
-                      "attached device, expects BI Enable (Table 8-157)\n",
+                      "CXL BI oracle: %s: BI Forward set on a %s with a "
+                      "directly attached device, expects BI Enable\n",
                       pdev->name, what);
     } else if (!direct && en) {
         qemu_log_mask(LOG_GUEST_ERROR,
-                      "CXL %s: BI Enable set on a %s above a switch, "
-                      "expects BI Forward (Table 8-157)\n", pdev->name, what);
+                      "CXL BI oracle: %s: BI Enable set on a %s above a "
+                      "switch, expects BI Forward\n", pdev->name, what);
     }
 }
 
