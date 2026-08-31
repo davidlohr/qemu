@@ -28,6 +28,7 @@ typedef struct CXLDownstreamPort {
     CXLComponentState cxl_cstate;
     CXLPhyPortPerst perst;
     bool bi_committed;
+    bool bi_fw_committed;
     char *bi_commit_fault;
     uint32_t bi_commit_fault_after;
 } CXLDownstreamPort;
@@ -48,19 +49,27 @@ static void latch_registers(CXLDownstreamPort *dsp)
                                        CXL2_DOWNSTREAM_PORT, true);
 
     /*
-     * Test knob: present a BI Decoder that platform firmware already
-     * programmed and committed for the device below, i.e. steps 3 and
-     * 4 of the CXL r4.0 9.14.2 allocate flow are done. An OS may adopt
-     * the port as-is; whether that is sound also depends on the switch
+     * Test knobs: present a BI Decoder that platform firmware already
+     * programmed and committed, i.e. steps 3 and 4 of the CXL r4.0
+     * 9.14.2 allocate flow are done. Which role is correct depends on
+     * what sits below this port, so the two are separate: BI Enable
+     * for a directly attached device (x-bi-committed), BI Forward for
+     * a port with a switch below it (x-bi-fw-committed). Staging the
+     * one that does not match the topology is also useful - it is how
+     * a test presents firmware that programmed the wrong role.
+     *
+     * Whether adopting the port is sound also depends on the switch
      * upstream port's route table (x-bi-rt-committed).
      *
      * The Commit bit is staged set alongside Committed: Table 8-158
      * ties the status to the last 0->1 transition of that bit, so a
      * component cannot present Committed with Commit clear.
      */
-    if (dsp->bi_committed) {
-        ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, BI_ENABLE, 1);
-        ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, BI_FW, 0);
+    if (dsp->bi_committed || dsp->bi_fw_committed) {
+        bool fw = dsp->bi_fw_committed;
+
+        ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, BI_ENABLE, !fw);
+        ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, BI_FW, fw);
         ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, COMMIT, 1);
         ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_STATUS, COMMITTED, 1);
     }
@@ -256,6 +265,8 @@ static const Property cxl_dsp_props[] = {
     DEFINE_PROP_PCIE_LINK_WIDTH("x-width", PCIESlot,
                                 width, PCIE_LINK_WIDTH_16),
     DEFINE_PROP_BOOL("x-256b-flit", PCIESlot, flitmode, true),
+    DEFINE_PROP_BOOL("x-bi-fw-committed", CXLDownstreamPort, bi_fw_committed,
+                     false),
     DEFINE_PROP_BOOL("x-bi-committed", CXLDownstreamPort, bi_committed,
                      false),
     DEFINE_PROP_STRING("x-bi-commit-fault", CXLDownstreamPort,

@@ -1533,6 +1533,17 @@ static void ct3d_reset(DeviceState *dev)
         ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY,
                          SUPPORTED_COHERENCY_MODEL, 0);
     }
+    /*
+     * Test knob: present a device that platform firmware already
+     * enabled BI on, i.e. step 7 of the CXL r4.0 9.14.2 allocate flow
+     * is done. Unlike x-committed this says nothing about the HDM
+     * decoders, so it composes with any topology - pair it with
+     * x-bi-committed / x-bi-fw-committed / x-bi-rt-committed on the
+     * ports above to present a path firmware brought up end to end.
+     */
+    if (ct3d->bi_enabled && ct3d->hdmdb) {
+        ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, BI_ENABLE, 1);
+    }
     cxl_device_register_init_t3(ct3d, CXL_T3_MSIX_MBOX);
 
     /*
@@ -1578,6 +1589,7 @@ static const Property ct3_props[] = {
     DEFINE_PROP_BOOL("hdm-db", CXLType3Dev, hdmdb, false),
     DEFINE_PROP_BOOL("x-coherency-unknown", CXLType3Dev, coherency_unknown,
                      false),
+    DEFINE_PROP_BOOL("x-bi-enabled", CXLType3Dev, bi_enabled, false),
     DEFINE_PROP_STRING("x-committed", CXLType3Dev, committed),
     DEFINE_PROP_UINT8("x-committed-ways", CXLType3Dev, committed_ways, 1),
 };
