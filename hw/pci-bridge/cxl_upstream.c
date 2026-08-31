@@ -113,6 +113,7 @@ static void latch_registers(CXLUpstreamPort *usp)
      * itself (CXL r4.0 Table 8-152).
      */
     if (usp->bi_rt_committed) {
+        ARRAY_FIELD_DP32(reg_state, CXL_BI_RT_CTRL, COMMIT, 1);
         ARRAY_FIELD_DP32(reg_state, CXL_BI_RT_STATUS, COMMITTED, 1);
     }
 }

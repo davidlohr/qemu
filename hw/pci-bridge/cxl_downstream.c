@@ -53,10 +53,15 @@ static void latch_registers(CXLDownstreamPort *dsp)
      * 4 of the CXL r4.0 9.14.2 allocate flow are done. An OS may adopt
      * the port as-is; whether that is sound also depends on the switch
      * upstream port's route table (x-bi-rt-committed).
+     *
+     * The Commit bit is staged set alongside Committed: Table 8-158
+     * ties the status to the last 0->1 transition of that bit, so a
+     * component cannot present Committed with Commit clear.
      */
     if (dsp->bi_committed) {
         ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, BI_ENABLE, 1);
         ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, BI_FW, 0);
+        ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, COMMIT, 1);
         ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_STATUS, COMMITTED, 1);
     }
 }
