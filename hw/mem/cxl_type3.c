@@ -326,6 +326,7 @@ static void ct3d_config_write(PCIDevice *pci_dev, uint32_t addr, uint32_t val,
     pcie_doe_write_config(&ct3d->doe_cdat, addr, val, size);
     pci_default_write_config(pci_dev, addr, val, size);
     pcie_aer_write_config(pci_dev, addr, val, size);
+    pcie_cap_flr_write_config(pci_dev, addr, val, size);
 }
 
 /*
@@ -980,6 +981,7 @@ static void ct3_realize(PCIDevice *pci_dev, Error **errp)
 
     init_alert_config(ct3d);
     pcie_cap_deverr_init(pci_dev);
+    pcie_cap_flr_init(pci_dev);
     /* Leave a bit of room for expansion */
     rc = pcie_aer_init(pci_dev, PCI_ERR_VER, 0x200, PCI_ERR_SIZEOF, errp);
     if (rc) {
@@ -1517,32 +1519,46 @@ static void ct3d_committed_decoder_init(CXLType3Dev *ct3d)
 static void ct3d_reset(DeviceState *dev)
 {
     CXLType3Dev *ct3d = CXL_TYPE3(dev);
+    PCIDevice *pci_dev = PCI_DEVICE(dev);
     uint32_t *reg_state = ct3d->cxl_cstate.crb.cache_mem_registers;
     uint32_t *write_msk = ct3d->cxl_cstate.crb.cache_mem_regs_write_mask;
+    /*
+     * An FLR resets the function, not the CXL.cache/mem state: the HDM
+     * and BI decoder programming survives it. Only bus-level and cold
+     * resets wipe the component registers. pcie_cap_flr_write_config()
+     * clears BCR_FLR after invoking the handler precisely so the
+     * handler can tell an FLR apart by reading it.
+     */
+    bool flr = pci_dev->exp.exp_cap &&
+               (pci_get_word(pci_dev->config + pci_dev->exp.exp_cap +
+                             PCI_EXP_DEVCTL) & PCI_EXP_DEVCTL_BCR_FLR);
 
-    pcie_cap_fill_link_ep_usp(PCI_DEVICE(dev), ct3d->width, ct3d->speed,
+    pcie_cap_fill_link_ep_usp(pci_dev, ct3d->width, ct3d->speed,
                               ct3d->flitmode);
-    cxl_component_register_init_common(reg_state, write_msk,
-                                       CXL2_TYPE3_DEVICE, ct3d->hdmdb);
-    /*
-     * Test knob: keep BI capability but decline to report the coherency
-     * models, as a device is permitted to do (Unknown, CXL r4.0 Table
-     * 8-116).
-     */
-    if (ct3d->coherency_unknown) {
-        ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY,
-                         SUPPORTED_COHERENCY_MODEL, 0);
-    }
-    /*
-     * Test knob: present a device that platform firmware already
-     * enabled BI on, i.e. step 7 of the CXL r4.0 9.14.2 allocate flow
-     * is done. Unlike x-committed this says nothing about the HDM
-     * decoders, so it composes with any topology - pair it with
-     * x-bi-committed / x-bi-fw-committed / x-bi-rt-committed on the
-     * ports above to present a path firmware brought up end to end.
-     */
-    if (ct3d->bi_enabled && ct3d->hdmdb) {
-        ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, BI_ENABLE, 1);
+    if (!flr) {
+        cxl_component_register_init_common(reg_state, write_msk,
+                                           CXL2_TYPE3_DEVICE, ct3d->hdmdb);
+        /*
+         * Test knob: keep BI capability but decline to report the
+         * coherency models, as a device is permitted to do (Unknown,
+         * CXL r4.0 Table 8-116).
+         */
+        if (ct3d->coherency_unknown) {
+            ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY,
+                             SUPPORTED_COHERENCY_MODEL, 0);
+        }
+        /*
+         * Test knob: present a device that platform firmware already
+         * enabled BI on, i.e. step 7 of the CXL r4.0 9.14.2 allocate
+         * flow is done. Unlike x-committed this says nothing about the
+         * HDM decoders, so it composes with any topology - pair it
+         * with x-bi-committed / x-bi-fw-committed / x-bi-rt-committed
+         * on the ports above to present a path firmware brought up end
+         * to end.
+         */
+        if (ct3d->bi_enabled && ct3d->hdmdb) {
+            ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, BI_ENABLE, 1);
+        }
     }
     cxl_device_register_init_t3(ct3d, CXL_T3_MSIX_MBOX);
 
