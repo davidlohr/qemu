@@ -779,6 +779,8 @@ struct CXLType3Dev {
     /* BI flows */
     bool hdmdb;
     bool coherency_unknown;
+    /* set by the cxl-accel subtype: device-coherent-only HDM */
+    bool accel;
     bool bi_enabled;
 
     struct dynamic_capacity {
@@ -819,6 +821,24 @@ struct CXLType3Class {
     bool (*set_cacheline)(CXLType3Dev *ct3d, uint64_t dpa_offset,
                           uint8_t *data);
 };
+
+/*
+ * A CXL Type 2 accelerator: a type3 device that also computes on its
+ * memory, so its HDM is device-coherent (HDM-D, or HDM-DB with
+ * hdm-db=on) rather than host-only.
+ */
+struct CXLAccelDev {
+    /* Private: Must be first */
+    CXLType3Dev parent_obj;
+};
+
+struct CXLAccelClass {
+    /* Private: Must be first */
+    CXLType3Class parent_class;
+};
+
+#define TYPE_CXL_ACCEL "cxl-accel"
+OBJECT_DECLARE_TYPE(CXLAccelDev, CXLAccelClass, CXL_ACCEL)
 
 struct CSWMBCCIDev {
     PCIDevice parent_obj;

@@ -1543,6 +1543,14 @@ static void ct3d_reset(DeviceState *dev)
          * coherency models, as a device is permitted to do (Unknown,
          * CXL r4.0 Table 8-116).
          */
+        /*
+         * An accelerator computes on its HDM: device-coherent only
+         * (HDM-D, or HDM-DB with hdm-db=on), never host-only.
+         */
+        if (ct3d->accel) {
+            ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY,
+                             SUPPORTED_COHERENCY_MODEL, 1);
+        }
         if (ct3d->coherency_unknown) {
             ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY,
                              SUPPORTED_COHERENCY_MODEL, 0);
@@ -2735,3 +2743,39 @@ static void ct3d_registers(void)
 }
 
 type_init(ct3d_registers);
+
+static void cxl_accel_init(Object *obj)
+{
+    CXL_TYPE3(obj)->accel = true;
+}
+
+static void cxl_accel_class_init(ObjectClass *oc, const void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(oc);
+    PCIDeviceClass *pc = PCI_DEVICE_CLASS(oc);
+
+    /*
+     * Keeps the parent's CXL memory class code so the guest CXL core
+     * drives it; the accelerator identity is carried by the HDM
+     * decoder capability's Supported Coherency Models field.
+     */
+    pc->device_id = 0xd94;
+
+    dc->desc = "CXL Accelerator Device (Type 2)";
+}
+
+static const TypeInfo cxl_accel_dev_info = {
+    .name = TYPE_CXL_ACCEL,
+    .parent = TYPE_CXL_TYPE3,
+    .class_size = sizeof(struct CXLAccelClass),
+    .class_init = cxl_accel_class_init,
+    .instance_size = sizeof(CXLAccelDev),
+    .instance_init = cxl_accel_init,
+};
+
+static void cxl_accel_dev_registers(void)
+{
+    type_register_static(&cxl_accel_dev_info);
+}
+
+type_init(cxl_accel_dev_registers);
