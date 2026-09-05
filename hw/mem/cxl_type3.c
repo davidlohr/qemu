@@ -861,8 +861,9 @@ static bool cxl_setup_memory(CXLType3Dev *ct3d, Error **errp)
 
     if (ct3d->committed) {
         if (strcmp(ct3d->committed, "hdm-h") &&
+            strcmp(ct3d->committed, "hdm-d") &&
             strcmp(ct3d->committed, "hdm-db")) {
-            error_setg(errp, "x-committed must be 'hdm-h' or 'hdm-db'");
+            error_setg(errp, "x-committed must be 'hdm-h', 'hdm-d' or 'hdm-db'");
             return false;
         }
         if (!ct3d->hostvmem || ct3d->hostpmem || ct3d->dc.num_regions) {
@@ -1374,9 +1375,24 @@ static bool ct3d_under_hb(CXLType3Dev *ct3d, PCIBus *hb_bus)
 struct committed_fmw_sel {
     CXLType3Dev *ct3d;
     bool bi;
+    bool hdmd;
     CXLFixedWindow *match;
     CXLFixedWindow *fallback;
 };
+
+/* the lowest-index window whose restrictions fit the decode mode */
+static bool committed_fmw_fits(struct committed_fmw_sel *sel,
+                               CXLFixedWindow *fw)
+{
+    if (sel->bi) {
+        return fw->restrictions & CXL_FMW_BI;
+    }
+    if (sel->hdmd) {
+        return (fw->restrictions & CXL_FMW_DEVICE_COHERENT) &&
+               !(fw->restrictions & CXL_FMW_BI);
+    }
+    return fw->restrictions & CXL_FMW_HOST_ONLY;
+}
 
 static int ct3d_committed_pick_fmw(Object *obj, void *opaque)
 {
@@ -1402,7 +1418,7 @@ static int ct3d_committed_pick_fmw(Object *obj, void *opaque)
         if (!sel->fallback || fw->index < sel->fallback->index) {
             sel->fallback = fw;
         }
-        if (fw->restrictions & (sel->bi ? CXL_FMW_BI : CXL_FMW_HOST_ONLY)) {
+        if (committed_fmw_fits(sel, fw)) {
             if (!sel->match || fw->index < sel->match->index) {
                 sel->match = fw;
             }
@@ -1419,10 +1435,11 @@ static int ct3d_committed_pick_fmw(Object *obj, void *opaque)
  * the base of a fixed memory window targeting this device's host bridge,
  * the decoder is marked committed and the HDM decoder capability enabled.
  * With x-committed=hdm-db the decoder operates in BI mode and the device
- * comes up with BI enabled.  The lowest-index window whose restrictions
- * match the decode mode is used, falling back to the lowest-index window
- * targeting the host bridge (emulating firmware that committed a decoder
- * under an incompatible window).
+ * comes up with BI enabled; with x-committed=hdm-d it is device coherent
+ * without BISnp (TRT and BI both clear).  The lowest-index window whose
+ * restrictions match the decode mode is used, falling back to the
+ * lowest-index window targeting the host bridge (emulating firmware that
+ * committed a decoder under an incompatible window).
  *
  * Only a directly attached device under a passthrough (single root port)
  * host bridge is supported: any other topology has decoders on the path
@@ -1434,6 +1451,7 @@ static void ct3d_committed_decoder_init(CXLType3Dev *ct3d)
     struct committed_fmw_sel sel = {
         .ct3d = ct3d,
         .bi = !strcmp(ct3d->committed, "hdm-db"),
+        .hdmd = !strcmp(ct3d->committed, "hdm-d"),
     };
     PCIDevice *br;
     CXLFixedWindow *fw;
@@ -1501,9 +1519,10 @@ static void ct3d_committed_decoder_init(CXLType3Dev *ct3d)
     ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, COMMITTED, 1);
     if (sel.bi) {
         ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, BI, 1);
-    } else {
+    } else if (!sel.hdmd) {
         ctrl = FIELD_DP32(ctrl, CXL_HDM_DECODER0_CTRL, TYPE, 1);
     }
+    /* hdm-d: TYPE (TRT) and BI both clear - device coherent, no BISnp */
     stl_le_p(cache_mem + R_CXL_HDM_DECODER0_CTRL, ctrl);
 
     ARRAY_FIELD_DP32(cache_mem, CXL_HDM_DECODER_GLOBAL_CONTROL,
