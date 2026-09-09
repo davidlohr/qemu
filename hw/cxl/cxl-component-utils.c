@@ -414,8 +414,18 @@ static void hdm_init_common(uint32_t *reg_state, uint32_t *write_msk,
 {
     int decoder_count = CXL_HDM_DECODER_COUNT;
     int hdm_inc = R_CXL_HDM_DECODER1_BASE_LO - R_CXL_HDM_DECODER0_BASE_LO;
-    uint32_t ctrl_mask = 0x13ff;
+    uint32_t ctrl_mask;
+    bool bi_capable;
+    bool hdm_db;
     int i;
+
+    hdm_db = type == CXL2_TYPE3_DEVICE && bi;
+    bi_capable = (type == CXL2_TYPE3_DEVICE || type == CXL2_UPSTREAM_PORT ||
+                  type == CXL2_RC) && bi;
+    ctrl_mask = 0x13ff;
+    if (bi_capable) {
+        ctrl_mask |= R_CXL_HDM_DECODER0_CTRL_BI_MASK;
+    }
 
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY, DECODER_COUNT,
                      cxl_decoder_count_enc(decoder_count));
@@ -438,10 +448,7 @@ static void hdm_init_common(uint32_t *reg_state, uint32_t *write_msk,
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_CAPABILITY,
                      SUPPORTED_COHERENCY_MODEL,
                      /* host+dev or Unknown */
-                     type == CXL2_TYPE3_DEVICE && bi ? 3 : 0);
-    if (type == CXL2_TYPE3_DEVICE && bi) {
-        ctrl_mask |= R_CXL_HDM_DECODER0_CTRL_BI_MASK;
-    }
+                     hdm_db ? 3 : 0);
     ARRAY_FIELD_DP32(reg_state, CXL_HDM_DECODER_GLOBAL_CONTROL,
                      HDM_DECODER_ENABLE, 0);
     write_msk[R_CXL_HDM_DECODER_GLOBAL_CONTROL] = 0x3;
