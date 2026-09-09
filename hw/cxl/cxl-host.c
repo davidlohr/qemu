@@ -264,47 +264,44 @@ static PCIDevice *cxl_cfmws_find_device(CXLFixedWindow *fw, hwaddr addr,
         return NULL;
     }
 
-    if (object_dynamic_cast(OBJECT(d), TYPE_CXL_TYPE3)) {
-        return d;
-    }
-
     /*
-     * Could also be a switch.  Note only one level of switching currently
-     * supported.
+     * Could also be a switch, at any depth: each USP decodes the address
+     * to one of its DSPs, and the next component down is whatever sits on
+     * that DSP's secondary bus.  The walk descends one bus per iteration,
+     * so it terminates on any well-formed topology.
      */
-    if (!object_dynamic_cast(OBJECT(d), TYPE_CXL_USP)) {
-        return NULL;
-    }
-    usp = CXL_USP(d);
+    while (!object_dynamic_cast(OBJECT(d), TYPE_CXL_TYPE3)) {
+        if (!object_dynamic_cast(OBJECT(d), TYPE_CXL_USP)) {
+            return NULL;
+        }
+        usp = CXL_USP(d);
 
-    usp_cstate = cxl_usp_to_cstate(usp);
-    if (!usp_cstate) {
-        return NULL;
-    }
+        usp_cstate = cxl_usp_to_cstate(usp);
+        if (!usp_cstate) {
+            return NULL;
+        }
 
-    cache_mem = usp_cstate->crb.cache_mem_registers;
+        cache_mem = usp_cstate->crb.cache_mem_registers;
 
-    target_found = cxl_hdm_find_target(cache_mem, addr, &target, &interleaved);
-    if (!target_found) {
-        return NULL;
-    }
+        target_found = cxl_hdm_find_target(cache_mem, addr, &target,
+                                           &interleaved);
+        if (!target_found) {
+            return NULL;
+        }
 
-    if (interleaved && !allow_interleave) {
-        return NULL;
-    }
+        if (interleaved && !allow_interleave) {
+            return NULL;
+        }
 
-    d = pcie_find_port_by_pn(&PCI_BRIDGE(d)->sec_bus, target);
-    if (!d) {
-        return NULL;
-    }
+        d = pcie_find_port_by_pn(&PCI_BRIDGE(d)->sec_bus, target);
+        if (!d) {
+            return NULL;
+        }
 
-    d = pci_bridge_get_sec_bus(PCI_BRIDGE(d))->devices[0];
-    if (!d) {
-        return NULL;
-    }
-
-    if (!object_dynamic_cast(OBJECT(d), TYPE_CXL_TYPE3)) {
-        return NULL;
+        d = pci_bridge_get_sec_bus(PCI_BRIDGE(d))->devices[0];
+        if (!d) {
+            return NULL;
+        }
     }
 
     return d;
