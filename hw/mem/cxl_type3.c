@@ -1551,6 +1551,16 @@ static void ct3d_reset(DeviceState *dev)
     bool flr = pci_dev->exp.exp_cap &&
                (pci_get_word(pci_dev->config + pci_dev->exp.exp_cap +
                              PCI_EXP_DEVCTL) & PCI_EXP_DEVCTL_BCR_FLR);
+    /*
+     * Firmware staging survives where firmware would rerun: a system
+     * reset (boot, reboot) stages, a guest-initiated secondary bus
+     * reset returns hardware defaults. The parent bridge still has
+     * the SBR bit set while its secondary bus resets, telling the
+     * two apart the same way BCR_FLR does for an FLR.
+     */
+    PCIDevice *br = pci_bridge_get_device(pci_get_bus(pci_dev));
+    bool sbr = br && (pci_get_word(br->config + PCI_BRIDGE_CONTROL) &
+                      PCI_BRIDGE_CTL_BUS_RESET);
 
     pcie_cap_fill_link_ep_usp(pci_dev, ct3d->width, ct3d->speed,
                               ct3d->flitmode);
@@ -1583,7 +1593,7 @@ static void ct3d_reset(DeviceState *dev)
          * on the ports above to present a path firmware brought up end
          * to end.
          */
-        if (ct3d->bi_enabled && ct3d->hdmdb) {
+        if (!sbr && ct3d->bi_enabled && ct3d->hdmdb) {
             ARRAY_FIELD_DP32(reg_state, CXL_BI_DECODER_CTRL, BI_ENABLE, 1);
         }
     }
@@ -1605,7 +1615,7 @@ static void ct3d_reset(DeviceState *dev)
     cxl_initialize_t3_ld_cci(&ct3d->ld0_cci, DEVICE(ct3d), DEVICE(ct3d),
                              512); /* Max payload made up */
 
-    if (ct3d->committed) {
+    if (!sbr && ct3d->committed) {
         ct3d_committed_decoder_init(ct3d);
     }
 }
