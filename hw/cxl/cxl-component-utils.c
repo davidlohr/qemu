@@ -263,23 +263,19 @@ static void bi_handler(CXLComponentState *cxl_cstate, hwaddr offset,
     case A_CXL_BI_RT_CTRL:
         type = CXL_BISTATE_RT;
         to_commit = FIELD_EX32(value, CXL_BI_RT_CTRL, COMMIT);
-        if (to_commit) {
-            sts = cxl_cache_mem_read_reg(cxl_cstate,
-                                         A_CXL_BI_RT_STATUS, 4);
-            sts = FIELD_DP32(sts, CXL_BI_RT_STATUS, COMMITTED, 0);
-            stl_le_p((uint8_t *)cache_mem + A_CXL_BI_RT_STATUS, sts);
-        }
+        sts = cxl_cache_mem_read_reg(cxl_cstate, A_CXL_BI_RT_STATUS, 4);
+        sts = FIELD_DP32(sts, CXL_BI_RT_STATUS, COMMITTED, 0);
+        sts = FIELD_DP32(sts, CXL_BI_RT_STATUS, ERR_NOT_COMMITTED, 0);
+        stl_le_p((uint8_t *)cache_mem + A_CXL_BI_RT_STATUS, sts);
         break;
     case A_CXL_BI_DECODER_CTRL:
         bi_decoder_dport_check(cxl_cstate, value);
         type = CXL_BISTATE_DECODER;
         to_commit = FIELD_EX32(value, CXL_BI_DECODER_CTRL, COMMIT);
-        if (to_commit) {
-            sts = cxl_cache_mem_read_reg(cxl_cstate,
-                                         A_CXL_BI_DECODER_STATUS, 4);
-            sts = FIELD_DP32(sts, CXL_BI_DECODER_STATUS, COMMITTED, 0);
-            stl_le_p((uint8_t *)cache_mem + A_CXL_BI_DECODER_STATUS, sts);
-        }
+        sts = cxl_cache_mem_read_reg(cxl_cstate, A_CXL_BI_DECODER_STATUS, 4);
+        sts = FIELD_DP32(sts, CXL_BI_DECODER_STATUS, COMMITTED, 0);
+        sts = FIELD_DP32(sts, CXL_BI_DECODER_STATUS, ERR_NOT_COMMITTED, 0);
+        stl_le_p((uint8_t *)cache_mem + A_CXL_BI_DECODER_STATUS, sts);
         break;
     default:
         break;
